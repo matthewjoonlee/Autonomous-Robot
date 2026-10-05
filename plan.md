@@ -72,6 +72,28 @@ Perception approach:
 
 Pass condition: all labeled poses produce the expected error directions, centered frames produce small errors, and missing/ambiguous markings produce low confidence. Review all three supplied front snapshots offline. Collect additional examples if they disagree.
 
+### Initial vision implementation and results
+
+`track_vision.py` implements offline and live diagnostics, with no motor commands. It uses a lower-image yellow mask, dash geometry filtering, and robust straight-line fitting. Its confidence score is a heuristic quality measure, not a probability. It reports normalized image-position and image-direction errors separately from relative IMU heading; these are not physical lateral distances or motor commands.
+
+Run `python track_vision.py` to analyze the five labeled captures from `session_20261005_172428_111633`. Run `python track_vision.py --live --duration 60` on the Pi to collect a one-minute motor-free diagnostic session. Stop other camera programs, keep motors disabled, align centered and straight at the prompt, and press Enter. Move the robot by hand through the same poses. The live tool saves annotated frames and CSV readings approximately once per second under `vision_results/`; `Ctrl+C` also stops it. Cyan is the calibrated reference and green is the detected line. The IMU is read near each frame rather than hardware synchronized.
+
+Offline results on the five labeled captures:
+
+| Pose | Status | Image position error at 85% image height | IMU relative heading |
+| --- | --- | --- | --- |
+| Centered straight | Tracked | 0.0 px (reference itself) | 0.00 degrees |
+| Left offset straight | Tracked | +62.2 px (line right of reference) | -0.875 degrees |
+| Right offset straight | Tracked | -52.1 px (line left of reference) | -0.0625 degrees |
+| Centered rotated left | Line lost | No estimate | -13.875 degrees |
+| Centered rotated right | Tracked | -272.3 px | +13.125 degrees |
+
+The large image shift during rotation confirms that pixel error alone must not be interpreted as sideways displacement. No distance calibration is inferred from the offset labels because the measurement notes were left blank. Live validation, wider displacement/rotation coverage, and repeated centered references are still needed. The left-rotation loss is correctly flagged; autonomous behavior on loss remains a stop until a separately bounded reacquisition procedure is implemented and tested.
+
+All three original centered front snapshots also produce tracked lines, but their image errors relative to the new centered reference are +20.7 px, +26.0 px, and -2.3 px. This spread means the single-reference 16 px diagnostic deadband is provisional and should not become an autonomous tolerance. Collect repeated carefully aligned centered poses with the mounting unchanged before setting a control deadband or physical centering tolerance.
+
+Regression checks cover the labeled physical images plus blank images, background yellow, horizontal crossing markings, and competing forward paths. Run `python -m unittest discover -s tests -p 'test_track_vision.py'` in an environment with OpenCV and NumPy. These checks do not establish autonomous recovery performance or general intersection handling.
+
 ## Phase 3: steering calibration at low speed
 
 Implement a bounded motor-test mode with explicit operator start and a fixed short duration for each command.
