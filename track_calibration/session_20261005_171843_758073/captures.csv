@@ -1,0 +1,1 @@
+timestamp,image,pose,note,camera_index,reference_deg,heading_before_deg,heading_after_deg,delta_after_deg,capture_start_monotonic_s,capture_end_monotonic_s,sensor_timestamp_ns,exposure_time_us,imu_status
