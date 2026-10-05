@@ -13,6 +13,7 @@ Drive forward on a straight track while keeping the robot's center over the yell
 - Wheels may travel onto the adjacent green surface during recovery. The goal remains to return the robot's center to the yellow dashed line. The approximately 1.7 cm margin per side on the black track, `(32 - 28.6) / 2`, is not a hard recovery limit or a reason to stop by itself.
 - Launch a separate autonomous program through Raspberry Pi Connect's remote shell. Keep `robot_controller.py` as the PS5 manual-control program.
 - Quiz 3 covers straight sections. Curves and autonomous intersection decisions are outside this first version. Crossing markings must not silently become a new tracking target.
+- The Quiz 3 track is continuous, with no floor gaps. The first live diagnostic used only part of the track; that setup does not represent the intended course.
 
 ## Existing interfaces
 
@@ -76,7 +77,7 @@ Pass condition: all labeled poses produce the expected error directions, centere
 
 `track_vision.py` implements offline and live diagnostics, with no motor commands. It uses a lower-image yellow mask, dash geometry filtering, and robust straight-line fitting. Its confidence score is a heuristic quality measure, not a probability. It reports normalized image-position and image-direction errors separately from relative IMU heading; these are not physical lateral distances or motor commands.
 
-Run `python track_vision.py` to analyze the five labeled captures from `session_20261005_172428_111633`. Run `python track_vision.py --live --duration 60` on the Pi to collect a one-minute motor-free diagnostic session. Stop other camera programs, keep motors disabled, align centered and straight at the prompt, and press Enter. Move the robot by hand through the same poses. The live tool saves annotated frames and CSV readings approximately once per second under `vision_results/`; `Ctrl+C` also stops it. Cyan is the calibrated reference and green is the detected line. The IMU is read near each frame rather than hardware synchronized.
+Run `python track_vision.py` to analyze the five labeled captures from `session_20261005_172428_111633`. Run `python track_vision.py --live --duration 60` on the Pi to collect a one-minute motor-free diagnostic session. Stop other camera programs, keep motors disabled, align centered and straight on a continuous section with several nearby dashes visible, and press Enter. By default, live mode captures a fresh centered reference and refuses to begin if that line is not reliably detected. Use `--reference` only to deliberately retain a supplied centered reference. Move the robot by hand through the same poses. The live tool saves unannotated PNGs in `raw/`, annotated JPGs, the startup reference, and CSV readings approximately once per second under `vision_results/`; `Ctrl+C` also stops it. Cyan is the calibrated reference and green is the detected line. The IMU is read near each frame rather than hardware synchronized.
 
 Offline results on the five labeled captures:
 
@@ -93,6 +94,22 @@ The large image shift during rotation confirms that pixel error alone must not b
 All three original centered front snapshots also produce tracked lines, but their image errors relative to the new centered reference are +20.7 px, +26.0 px, and -2.3 px. This spread means the single-reference 16 px diagnostic deadband is provisional and should not become an autonomous tolerance. Collect repeated carefully aligned centered poses with the mounting unchanged before setting a control deadband or physical centering tolerance.
 
 Regression checks cover the labeled physical images plus blank images, background yellow, horizontal crossing markings, and competing forward paths. Run `python -m unittest discover -s tests -p 'test_track_vision.py'` in an environment with OpenCV and NumPy. These checks do not establish autonomous recovery performance or general intersection handling.
+
+### First live diagnostic run: revision required
+
+`vision_results/run_20261005_173524_741537` contains 60 annotated frames and 60 CSV rows. Status counts are 12 tracked, 28 line lost, and 20 ambiguous. All 60 IMU readings were available. The first approximately 22 seconds have zero relative heading but inconsistent vision statuses, so the current vision implementation is not ready for motor control.
+
+Visual inspection of frames 0, 5, 17, 40, 45, and 59 shows a floor gap between the nearby track and a separate farther track piece. Several frames contain only one nearby dash. Some accepted fits incorrectly join that dash with small yellow-mask speckles on green surfaces. A tracked status therefore does not establish a correct fit in this run.
+
+Before powered tests, strengthen candidate filtering and require plausible track support so grass speckles cannot form a path. Save raw frames alongside annotations in future live runs; the current annotations change image pixels and must not be treated as clean raw inputs for detector revalidation. Confirm whether the floor gap is part of the Quiz 3 setup; if so, specify explicit gap behavior instead of silently fitting across separate track pieces. Repeat live diagnostics on the intended setup and verify every accepted fit visually before steering calibration.
+
+### Detector revision and next physical test
+
+The user confirmed that the actual track has no gaps. The revised detector narrows the yellow hue range to exclude the green tail, rejects sparse blobs, requires dark track around each candidate dash, and checks dark track support along both sides of the fitted path. These are initial thresholds based on the supplied images, not guarantees across lighting conditions. It retains the existing minimum dash count and near-field coverage requirements rather than extrapolating a path from one dash.
+
+Ten regression checks passed after this change, including the original and labeled physical snapshots, collinear yellow speckles on green plus one nearby dash, bright-floor markings, floor-gap rejection, competing paths, and simulated live capture with exact unannotated PNG saving and hardware cleanup. This does not establish real-time performance or physical continuous-track reliability.
+
+Repeat the 60-second stationary diagnostic on a continuous straight section, keeping several nearby dashes in view. Hold centered for approximately 10 seconds, left offset for 10 seconds, right offset for 10 seconds, left rotation for 10 seconds, right rotation for 10 seconds, and centered again for the remainder. Start with small offsets and rotations, then increase after reviewing the results. Capture notes on approximate distances/angles if possible. Upload the entire new run folder including `raw/`, both startup reference images, and `results.csv`. Review accepted fits on the actual yellow line and inspect line-loss cases before enabling motors.
 
 ## Phase 3: steering calibration at low speed
 

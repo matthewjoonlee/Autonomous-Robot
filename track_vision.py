@@ -26,11 +26,41 @@ ROI_TOP, ROI_BOTTOM = 0.56, 0.98
 NEAR_Y, FAR_Y = 0.85, 0.65
 
 
+def dark_track_support(hsv, x, y, w, h):
+    """Fraction of a small surrounding ring that looks like dark track."""
+    height, width = hsv.shape[:2]
+    pad = max(3, round(width * 0.008))
+    left, top = max(0, x - pad), max(0, y - pad)
+    patch = hsv[top:min(height, y + h + pad), left:min(width, x + w + pad)]
+    ring = np.ones(patch.shape[:2], dtype=bool)
+    ring[y - top:y - top + h, x - left:x - left + w] = False
+    surrounding = patch[ring]
+    if not len(surrounding):
+        return 0.0
+    return float(np.mean((surrounding[:, 2] < 125) & (surrounding[:, 1] < 120)))
+
+
+def path_track_support(hsv, slope, intercept, low_y, high_y):
+    """Require dark pavement on both sides of the fitted path along its span."""
+    height, width = hsv.shape[:2]
+    ys = np.linspace(low_y, high_y, 32)
+    samples = []
+    for offset in (-0.025, 0.025):
+        xs = slope * ys + intercept + offset
+        if np.any((xs < 0) | (xs >= 1)):
+            return 0.0
+        pixels = hsv[(ys * height).astype(int), (xs * width).astype(int)]
+        samples.extend(((pixels[:, 2] < 125) & (pixels[:, 1] < 120)).tolist())
+    return float(np.mean(samples))
+
+
 def detect_line(frame):
     """Find a straight dashed-line candidate; refuse weak or competing fits."""
     height, width = frame.shape[:2]
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, np.array([18, 85, 85]), np.array([42, 255, 255]))
+    # The original hue range included textured green surfaces (around H=42).
+    # Retain the lighter yellow dashes (around H=30..33) without that green tail.
+    mask = cv2.inRange(hsv, np.array([18, 85, 130]), np.array([38, 255, 255]))
     mask[:int(height * ROI_TOP)] = 0
     mask[int(height * ROI_BOTTOM):] = 0
     count, _, stats, centers = cv2.connectedComponentsWithStats(mask)
@@ -38,9 +68,11 @@ def detect_line(frame):
     for index in range(1, count):
         x, y, w, h, area = stats[index]
         # Reject specks, horizontal cross markings, and implausibly large blobs.
-        if (area >= max(6, width * height * 0.00002)
+        if (area >= max(10, width * height * 0.00003)
                 and w < width * 0.12 and h < height * 0.12
-                and w / max(h, 1) < 3.0):
+                and w / max(h, 1) < 3.0
+                and area / (w * h) >= 0.50
+                and dark_track_support(hsv, x, y, w, h) >= 0.65):
             points.append((centers[index][0] / width, centers[index][1] / height))
     points = np.array(points, dtype=float).reshape(-1, 2)
     result = {"status": "line_lost", "confidence": 0.0, "points": points,
@@ -60,6 +92,9 @@ def detect_line(frame):
             continue
         span = float(np.ptp(selected[:, 1]))
         if span < 0.18 or selected[:, 1].max() < 0.82:
+            continue
+        if path_track_support(hsv, slope, intercept,
+                              selected[:, 1].min(), selected[:, 1].max()) < 0.80:
             continue
         fits.append((len(selected), span, inliers))
     if not fits:
@@ -139,7 +174,7 @@ def annotate(frame, detection, reference, summary):
 
 def save_frame(path, frame):
     if not cv2.imwrite(str(path), frame):
-        raise RuntimeError(f"Cannot save annotated frame: {path}")
+        raise RuntimeError(f"Cannot save frame: {path}")
 
 
 def offline(session, reference, output):
@@ -185,10 +220,27 @@ def live(args, reference, output):
         if "ColourGains" in metadata:
             camera.set_controls({"AwbEnable": False, "ColourGains": metadata["ColourGains"]})
         input("Align robot centered and straight, then press Enter to zero heading and begin: ")
+        raw_output = output / "raw"
+        raw_output.mkdir()
+        reference_frame = cv2.cvtColor(camera.capture_array(), cv2.COLOR_BGRA2BGR)
+        save_frame(output / "reference_raw.png", reference_frame)
+        starting_detection = detect_line(reference_frame)
+        if args.reference is None:
+            # A fresh explicitly aligned reference avoids differences between
+            # the old still photos and today's camera pose/exposure.
+            reference = starting_detection
+            if reference["status"] != "tracked":
+                raise RuntimeError("Starting line not reliably visible. Use a continuous straight "
+                                   "track with several nearby dashes visible and restart.")
+            reference["width"] = reference_frame.shape[1]
+        save_frame(output / "reference_annotated.jpg", annotate(
+            reference_frame, starting_detection, reference,
+            summarize(starting_detection, reference)))
         zero = read_heading(imu)
         if zero is None:
             raise RuntimeError("Heading unavailable; cannot set reference")
-        print("Move/rotate by hand. No motor commands. Ctrl+C stops. Saving one frame per interval.")
+        print("Move/rotate by hand. No motor commands. Ctrl+C stops.")
+        print("Saving unannotated PNGs in raw/ and diagnostic JPGs alongside results.csv.")
         start = time.monotonic()
         count = 0
         with (output / "results.csv").open("x", newline="") as log:
@@ -201,7 +253,11 @@ def live(args, reference, output):
                 detection = detect_line(frame)
                 summary = summarize(detection, reference, delta)
                 name = f"frame_{count:05d}.jpg"
-                row = {"image": name, "elapsed_s": round(time.monotonic() - start, 3),
+                raw_name = f"raw/frame_{count:05d}.png"
+                # Save before drawing overlays, preserving exact detector input.
+                save_frame(output / raw_name, frame)
+                row = {"image": name, "raw_image": raw_name,
+                       "elapsed_s": round(time.monotonic() - start, 3),
                        "imu_status": "ok" if heading is not None else "unavailable", **summary}
                 if writer is None:
                     writer = csv.DictWriter(log, fieldnames=list(row))
@@ -243,12 +299,14 @@ def main():
 
     signal.signal(signal.SIGTERM, terminate)
     try:
-        path = args.reference or args.session / "001_centered_straight.jpg"
-        frame = read_image(path)
-        reference = detect_line(frame)
-        if reference["status"] != "tracked":
-            raise RuntimeError("Cannot reliably detect the centered reference line")
-        reference["width"] = frame.shape[1]
+        reference = None
+        if not args.live or args.reference is not None:
+            path = args.reference or args.session / "001_centered_straight.jpg"
+            frame = read_image(path)
+            reference = detect_line(frame)
+            if reference["status"] != "tracked":
+                raise RuntimeError("Cannot reliably detect the centered reference line")
+            reference["width"] = frame.shape[1]
         output = args.output / datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
         output.mkdir(parents=True, exist_ok=False)
         print(f"Results: {output}")
