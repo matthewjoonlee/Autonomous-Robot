@@ -1,0 +1,6 @@
+timestamp,image,pose,note,camera_index,reference_deg,heading_before_deg,heading_after_deg,delta_after_deg,capture_start_monotonic_s,capture_end_monotonic_s,sensor_timestamp_ns,exposure_time_us,imu_status
+2026-10-05T17:25:22.305493-04:00,001_centered_straight.jpg,centered_straight,,0,349.1875,349.1875,349.1875,0.0,3502.966868275,3502.987174043,3502972256000,32876,ok
+2026-10-05T17:25:46.919097-04:00,002_left_offset_straight.jpg,left_offset_straight,,0,349.1875,348.3125,348.3125,-0.875,3527.598638825,3527.609447929,3527594559000,32876,ok
+2026-10-05T17:26:03.043557-04:00,003_right_offset_straight.jpg,right_offset_straight,,0,349.1875,349.125,349.125,-0.0625,3543.69942722,3543.733893137,3543720670000,32876,ok
+2026-10-05T17:26:21.803150-04:00,004_centered_rotated_left.jpg,centered_rotated_left,,0,349.1875,335.3125,335.3125,-13.875,3562.461643518,3562.493672347,3562478936000,31034,ok
+2026-10-05T17:26:39.495239-04:00,005_centered_rotated_right.jpg,centered_rotated_right,,0,349.1875,2.3125,2.3125,13.125,3580.177816714,3580.185614769,3580171012000,32876,ok
