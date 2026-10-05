@@ -32,9 +32,21 @@ Implement `test_imu.py` first. It must never initialize the motor controller or 
 
 Pass condition: readings are usable, rotation direction is understood, and drift/dropouts have been measured. Do not select controller gains before seeing these results.
 
+### Initial IMU results (October 5, 2026)
+
+- Pulled two physical-test CSVs into `imu_logs/`. Neither contained unavailable readings (584 readings total).
+- The second log, `imu_20261005_170244_281459.csv`, contains the complete left/center/right/center sequence. Final three-second readings were: initial centered 0.00 degrees, left -24.75 degrees, returned centered -1.25 degrees, right +28.938 degrees, final centered -0.688 degrees.
+- Left is negative and right is positive with the existing `SIGN = +1`; retain that convention.
+- Initial stationary readings after zeroing were stable. Return offsets below approximately 1.3 degrees are encouraging but cannot distinguish sensor drift from manual alignment error. A longer stationary drift test remains useful before tuning heading control.
+- The first log ends during the left phase and does not validate right rotation or return-to-center behavior.
+- Blinka initially failed to open GPIO devices with two-digit chip numbers. The test ran after the library-upgrade step; use a Blinka release containing the multi-digit chip-selection fix (9.2.0 or later) on this Pi.
+- Proceed to labeled camera calibration. Physical steering response and autonomous recovery remain untested.
+
 ## Phase 2: camera calibration and perception without motors
 
 Implement a camera calibration/perception tool before powered autonomous driving.
+
+`calibrate_track.py` now implements stationary collection through the remote shell, without display-window or motor dependencies. Run `python calibrate_track.py`, align centered and straight, and enter `z` to set the heading reference. Position the robot before entering each capture command: `c` centered straight, `l` left offset straight, `r` right offset straight, `a` centered rotated left, `d` centered rotated right, or `x` combined. Enter an approximate displacement/angle note when prompted. Capture at least two images per pose, keep the same IMU reference, and use `q` to finish. Images and a CSV with bracketing IMU readings and capture metadata are saved together under `track_calibration/session_*/`. These are nearby readings, not hardware-synchronized camera/IMU samples. Perception estimation is still to be implemented and validated against these labeled images.
 
 Collect labeled front-camera snapshots with the camera mounting unchanged:
 
@@ -119,7 +131,7 @@ Success means the robot returns to the yellow centerline, aligns with the straig
 
 1. Place the robot centered and straight on the track. Keep the camera mount unchanged.
 2. Widths and permission to recover on the green surface are recorded. Measure robot length and the usable surrounding surface, and note whether the camera points straight ahead or is angled.
-3. Keep motors disabled for the first sensor tests. `test_imu.py` is implemented; physical IMU validation is still pending.
+3. Keep motors disabled during stationary sensor tests. `test_imu.py` is implemented and the initial physical left/right heading test is recorded above.
 4. Run `python test_imu.py` in the Pi's existing Python environment through Raspberry Pi Connect. Wait for readings to settle, align straight, and enter `z` followed by Enter. Hold still for 10 seconds, enter `l` and rotate left approximately 20–30 degrees, enter `c` and return straight, then repeat with `r` to the right and `c` to return. Hold each pose for a few seconds. Enter `q` or press `Ctrl+C` to finish. Share the readings and generated CSV from `imu_logs/`.
 5. Then collect the labeled offset and rotation snapshots from Phase 2 before attempting autonomous motion.
 
