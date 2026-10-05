@@ -1,0 +1,61 @@
+image,raw_image,elapsed_s,imu_status,status,confidence,near_error_px,near_error_normalized,image_direction_error,imu_delta_deg,diagnostic
+frame_00000.jpg,raw/frame_00000.png,0.05,ok,tracked,0.95,-0.0,-2e-05,1e-05,0.0,NEAR REFERENCE
+frame_00001.jpg,raw/frame_00001.png,1.039,ok,tracked,0.934,-0.3,-0.00052,-0.00037,0.0,NEAR REFERENCE
+frame_00002.jpg,raw/frame_00002.png,2.037,ok,tracked,0.934,-0.3,-0.00047,-0.00031,0.0,NEAR REFERENCE
+frame_00003.jpg,raw/frame_00003.png,3.035,ok,tracked,0.954,0.1,0.00014,0.00015,0.0,NEAR REFERENCE
+frame_00004.jpg,raw/frame_00004.png,4.035,ok,tracked,0.955,0.1,0.00013,7e-05,0.0,NEAR REFERENCE
+frame_00005.jpg,raw/frame_00005.png,5.036,ok,tracked,0.944,10.8,0.01685,0.00261,-0.5,NEAR REFERENCE
+frame_00006.jpg,raw/frame_00006.png,6.046,ok,tracked,0.63,114.3,0.17854,0.03771,-2.5625,LINE RIGHT OF REFERENCE
+frame_00007.jpg,raw/frame_00007.png,7.048,ok,tracked,0.965,73.2,0.11431,0.03794,-0.9375,LINE RIGHT OF REFERENCE
+frame_00008.jpg,raw/frame_00008.png,8.05,ok,tracked,0.954,98.8,0.15438,0.04087,-2.1875,LINE RIGHT OF REFERENCE
+frame_00009.jpg,raw/frame_00009.png,9.05,ok,tracked,0.938,96.3,0.15039,0.03997,-2.125,LINE RIGHT OF REFERENCE
+frame_00010.jpg,raw/frame_00010.png,10.048,ok,tracked,0.942,96.4,0.15062,0.04022,-2.125,LINE RIGHT OF REFERENCE
+frame_00011.jpg,raw/frame_00011.png,11.048,ok,tracked,0.937,96.4,0.15057,0.04007,-2.125,LINE RIGHT OF REFERENCE
+frame_00012.jpg,raw/frame_00012.png,12.042,ok,tracked,0.713,23.0,0.03589,0.00417,-1.0625,LINE RIGHT OF REFERENCE
+frame_00013.jpg,raw/frame_00013.png,13.049,ok,tracked,0.928,-38.0,-0.0593,-0.04057,-1.4375,LINE LEFT OF REFERENCE
+frame_00014.jpg,raw/frame_00014.png,14.048,ok,tracked,0.929,-54.7,-0.08545,-0.04116,-0.5,LINE LEFT OF REFERENCE
+frame_00015.jpg,raw/frame_00015.png,15.046,ok,tracked,0.936,-54.6,-0.08527,-0.04063,-0.5,LINE LEFT OF REFERENCE
+frame_00016.jpg,raw/frame_00016.png,16.046,ok,tracked,0.934,-54.5,-0.08519,-0.04034,-0.5,LINE LEFT OF REFERENCE
+frame_00017.jpg,raw/frame_00017.png,17.042,ok,tracked,0.563,145.2,0.22686,0.01075,-10.4375,ROTATED LEFT
+frame_00018.jpg,raw/frame_00018.png,18.037,ok,line_lost,0.0,,,,-16.125,LINE LOST - no position estimate
+frame_00019.jpg,raw/frame_00019.png,19.037,ok,line_lost,0.0,,,,-15.4375,LINE LOST - no position estimate
+frame_00020.jpg,raw/frame_00020.png,20.035,ok,line_lost,0.0,,,,-15.5,LINE LOST - no position estimate
+frame_00021.jpg,raw/frame_00021.png,21.036,ok,line_lost,0.0,,,,-15.5,LINE LOST - no position estimate
+frame_00022.jpg,raw/frame_00022.png,22.035,ok,line_lost,0.0,,,,-2.375,LINE LOST - no position estimate
+frame_00023.jpg,raw/frame_00023.png,23.073,ok,tracked,0.945,-282.1,-0.44076,-0.03131,14.1875,ROTATED RIGHT
+frame_00024.jpg,raw/frame_00024.png,24.076,ok,tracked,0.937,-277.2,-0.43308,-0.03067,13.9375,ROTATED RIGHT
+frame_00025.jpg,raw/frame_00025.png,25.08,ok,tracked,0.921,-277.5,-0.43363,-0.03131,13.9375,ROTATED RIGHT
+frame_00026.jpg,raw/frame_00026.png,26.077,ok,tracked,0.926,-277.5,-0.43355,-0.031,13.9375,ROTATED RIGHT
+frame_00027.jpg,raw/frame_00027.png,27.069,ok,line_lost,0.0,,,,2.875,LINE LOST - no position estimate
+frame_00028.jpg,raw/frame_00028.png,28.068,ok,tracked,0.519,6.2,0.00961,0.00605,0.375,NEAR REFERENCE
+frame_00029.jpg,raw/frame_00029.png,29.074,ok,tracked,0.936,5.6,0.00871,0.00414,0.375,NEAR REFERENCE
+frame_00030.jpg,raw/frame_00030.png,30.073,ok,tracked,0.938,5.4,0.00845,0.0041,0.375,NEAR REFERENCE
+frame_00031.jpg,raw/frame_00031.png,31.073,ok,tracked,0.936,5.4,0.00842,0.004,0.375,NEAR REFERENCE
+frame_00032.jpg,raw/frame_00032.png,32.075,ok,tracked,0.936,5.4,0.00842,0.00397,0.375,NEAR REFERENCE
+frame_00033.jpg,raw/frame_00033.png,33.071,ok,tracked,0.932,5.4,0.00842,0.00393,0.375,NEAR REFERENCE
+frame_00034.jpg,raw/frame_00034.png,34.071,ok,tracked,0.929,5.4,0.00842,0.00392,0.375,NEAR REFERENCE
+frame_00035.jpg,raw/frame_00035.png,35.072,ok,tracked,0.931,5.3,0.00834,0.00386,0.375,NEAR REFERENCE
+frame_00036.jpg,raw/frame_00036.png,36.072,ok,tracked,0.927,5.3,0.00829,0.0037,0.375,NEAR REFERENCE
+frame_00037.jpg,raw/frame_00037.png,37.071,ok,tracked,0.952,5.7,0.00889,0.00427,0.375,NEAR REFERENCE
+frame_00038.jpg,raw/frame_00038.png,38.07,ok,tracked,0.953,5.7,0.0089,0.00422,0.375,NEAR REFERENCE
+frame_00039.jpg,raw/frame_00039.png,39.067,ok,tracked,0.95,5.7,0.00888,0.00417,0.375,NEAR REFERENCE
+frame_00040.jpg,raw/frame_00040.png,40.067,ok,tracked,0.95,5.7,0.00887,0.00424,0.375,NEAR REFERENCE
+frame_00041.jpg,raw/frame_00041.png,41.068,ok,tracked,0.932,5.4,0.00839,0.00377,0.375,NEAR REFERENCE
+frame_00042.jpg,raw/frame_00042.png,42.068,ok,tracked,0.93,5.4,0.00839,0.00378,0.375,NEAR REFERENCE
+frame_00043.jpg,raw/frame_00043.png,43.068,ok,tracked,0.926,5.4,0.00839,0.00386,0.375,NEAR REFERENCE
+frame_00044.jpg,raw/frame_00044.png,44.068,ok,tracked,0.929,5.3,0.00834,0.00382,0.375,NEAR REFERENCE
+frame_00045.jpg,raw/frame_00045.png,45.067,ok,tracked,0.933,5.4,0.00837,0.00385,0.375,NEAR REFERENCE
+frame_00046.jpg,raw/frame_00046.png,46.068,ok,tracked,0.932,5.4,0.00846,0.00401,0.375,NEAR REFERENCE
+frame_00047.jpg,raw/frame_00047.png,47.065,ok,tracked,0.934,5.4,0.00841,0.00392,0.375,NEAR REFERENCE
+frame_00048.jpg,raw/frame_00048.png,48.065,ok,tracked,0.934,5.4,0.00847,0.00391,0.375,NEAR REFERENCE
+frame_00049.jpg,raw/frame_00049.png,49.066,ok,tracked,0.937,5.5,0.00854,0.0042,0.375,NEAR REFERENCE
+frame_00050.jpg,raw/frame_00050.png,50.065,ok,tracked,0.935,5.4,0.00847,0.00407,0.375,NEAR REFERENCE
+frame_00051.jpg,raw/frame_00051.png,51.064,ok,tracked,0.938,5.4,0.00849,0.0041,0.375,NEAR REFERENCE
+frame_00052.jpg,raw/frame_00052.png,52.066,ok,tracked,0.941,5.5,0.00856,0.00425,0.375,NEAR REFERENCE
+frame_00053.jpg,raw/frame_00053.png,53.066,ok,tracked,0.936,5.5,0.00855,0.00422,0.375,NEAR REFERENCE
+frame_00054.jpg,raw/frame_00054.png,54.064,ok,tracked,0.943,5.5,0.00858,0.00422,0.375,NEAR REFERENCE
+frame_00055.jpg,raw/frame_00055.png,55.062,ok,tracked,0.938,5.4,0.00844,0.00416,0.375,NEAR REFERENCE
+frame_00056.jpg,raw/frame_00056.png,56.06,ok,tracked,0.938,5.4,0.00845,0.00422,0.375,NEAR REFERENCE
+frame_00057.jpg,raw/frame_00057.png,57.061,ok,tracked,0.935,5.4,0.00851,0.00416,0.375,NEAR REFERENCE
+frame_00058.jpg,raw/frame_00058.png,58.063,ok,tracked,0.937,5.4,0.00851,0.00416,0.375,NEAR REFERENCE
+frame_00059.jpg,raw/frame_00059.png,59.062,ok,tracked,0.942,5.4,0.00851,0.00418,0.375,NEAR REFERENCE
