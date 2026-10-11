@@ -206,6 +206,12 @@ git push origin main
 
 Nine new simulated tests passed for physical steering direction/sign conversion, straightening feedback, command limits, invalid/low-confidence/stale data, heading limits, line-loss latch, IMU loss/interruption, capture delays, run deadlines, and motor-free operation. Physical centering performance remains unvalidated. Review these first results before intentional offsets or foot pushes.
 
+### Motor-free controller validation (October 11, 2026)
+
+`centering_results/run_20261011_183051_983741` completed the requested three seconds with `execute: false`. All 74 readings were tracked and diagnostic-only; proposed steering was zero throughout. Image error stayed between approximately 0.0 and 0.1 px, relative heading stayed zero, and processing took 12.2–48.6 ms (mean approximately 29.0 ms). Maximum time between logged samples was 69.4 ms, below the configured 150 ms limit in this stationary test.
+
+The operator note says `Didn't really move`; no motor controller was initialized in this mode, so no movement was expected. Startup and selected raw frames show a continuous straight track. Proceed to one three-second powered run from centered and straight, without offsets or pushes, then review travel/stopping and logged correction behavior. Timing while moving and actual centering performance are still unvalidated.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
