@@ -262,6 +262,12 @@ git push origin main
 
 The four-trial order, stop after cancellation/fault, time-estimate conversion, and finish-stop checks before/during capture are covered by five new simulated tests. These supplement the existing controller, vision, and motor checks; physical offset and nudge recovery remain to be measured.
 
+### First course-suite attempt
+
+Only the straight trial was uploaded: `centering_results/run_20261011_184441_221716`. It stopped at approximately 0.471 seconds on `Tracking fault: line_lost`, so the suite did not reach left/right/nudge trials. The first ten samples commanded forward 25 / turn 0; heading stayed within +0.125 degrees and image error within approximately -3.2 to +0.7 px. The last raw frame still visibly contains the line with modest motion blur.
+
+The failure frame retains six accepted dashes, but their span is approximately 0.130 image height, below the new dense-fit 0.14 requirement. Other true dashes were rejected at width/height ratios around 3 or greater, including dashes split near a tile seam. The count/span and individual-shape rules still depend too strongly on dash phase and blur during motion. A broader motion/phase regression dataset and robust handling of short tracking interruptions are needed before the full suite can succeed. Any interruption recovery should stop forward commands while waiting for trustworthy new frames and remain bounded; do not continue blind forward motion or merely reduce controller confidence globally.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
