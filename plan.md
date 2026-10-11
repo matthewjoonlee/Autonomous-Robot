@@ -212,6 +212,12 @@ Nine new simulated tests passed for physical steering direction/sign conversion,
 
 The operator note says `Didn't really move`; no motor controller was initialized in this mode, so no movement was expected. Startup and selected raw frames show a continuous straight track. Proceed to one three-second powered run from centered and straight, without offsets or pushes, then review travel/stopping and logged correction behavior. Timing while moving and actual centering performance are still unvalidated.
 
+### First powered controller result: coverage threshold failure
+
+`centering_results/run_20261011_183304_621915` enabled motors but stopped after approximately 0.727 seconds with `Tracking fault: line_lost`, before the requested three-second duration. Fifteen samples commanded forward 25; raw steering was zero except two samples at -1. Heading stayed within -0.1875 to +0.125 degrees, image errors within approximately -3.0 to +3.5 px, and processing remained below 46 ms. No operator note was saved because the fault exited before that prompt; prompt physical stopping still needs operator confirmation.
+
+The final raw frame visibly retains the yellow line. Reinspection finds seven accepted collinear dash centers with full dark-track support, but their vertical span is approximately 0.167 of image height, below the detector's fixed 0.18 requirement. Some other dashes are excluded by the width/height rule near a tile seam. This is a detector coverage rejection while moving, not evidence that the robot departed the line or that correction gains are wrong. Revise and regression-test coverage/geometry handling against this real failure frame before repeating a powered run; retain stop-on-loss behavior.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
