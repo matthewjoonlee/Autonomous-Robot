@@ -228,6 +228,12 @@ The former failure frame now tracks at approximately 0.904 confidence with near-
 
 Repeat one three-second powered run from centered and straight, with no pushes, using `python quiz3_autonomous.py --execute --duration 3`. Upload `centering_results/` after recording movement and stopping observations. The software fix is validated on saved frames; moving performance beyond the previous 0.73 seconds still needs physical verification.
 
+### Centered powered retest completed
+
+`centering_results/run_20261011_183715_697962` completed the requested three seconds with motors enabled. All 63 sampled frames were tracked (62 driving rows and one duration-complete row). Image error ranged from -9.7 to +2.9 px and ended at -3.2 px; relative heading stayed between -0.1875 and +0.25 degrees. Raw steering ranged from -1 to +2, processing peaked at 50.1 ms, and confidence stayed above 0.835. The operator noted `moved forward straight slowly`.
+
+This validates a short centered forward trial, not recovery from displacement. Next run one bounded five-second trial starting approximately 2 cm left of the line: capture the reference and IMU zero while centered/straight, then shift the robot left without rotating it while paused at the `RUN` prompt. Do not recapture or zero from the displaced pose. Record the starting offset, correction direction, final position, and stopping. Review that trial before testing the opposite offset or introducing pushes.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
