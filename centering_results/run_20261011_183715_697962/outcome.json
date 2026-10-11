@@ -1,0 +1,16 @@
+{
+  "execute": true,
+  "duration_s": 3.0,
+  "settings": {
+    "speed": 25,
+    "max_turn": 10,
+    "position_gain": 40.0,
+    "heading_gain": 3.0,
+    "max_target_heading": 4.0,
+    "abort_heading": 10.0,
+    "min_confidence": 0.65,
+    "image_deadband": 0.0125,
+    "max_sample_age": 0.15
+  },
+  "reason": "duration_complete"
+}
