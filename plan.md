@@ -111,9 +111,34 @@ Ten regression checks passed after this change, including the original and label
 
 Repeat the 60-second stationary diagnostic on a continuous straight section, keeping several nearby dashes in view. Hold centered for approximately 10 seconds, left offset for 10 seconds, right offset for 10 seconds, left rotation for 10 seconds, right rotation for 10 seconds, and centered again for the remainder. Start with small offsets and rotations, then increase after reviewing the results. Capture notes on approximate distances/angles if possible. Upload the entire new run folder including `raw/`, both startup reference images, and `results.csv`. Review accepted fits on the actual yellow line and inspect line-loss cases before enabling motors.
 
+### Continuous-track live results (October 5, 2026)
+
+`vision_results/run_20261005_174624_462341` contains 60 raw PNGs, 60 annotated frames, startup references, and a CSV. It reports 54 tracked frames, six line-loss frames, zero ambiguous frames, and no unavailable IMU readings. Replaying all raw frames locally reproduced every logged detection status.
+
+Representative annotated frames show the accepted fits following the yellow line. Initial centered frames stay within approximately 0.3 px of the startup reference. Offset holds show approximately +96 px and -55 px errors; heading changed slightly too, so these are not pure physical-distance measurements. A right rotation around +14 degrees remains tracked. Frames 18–21 lose the near-field line around -15 to -16 degrees left rotation; inspected frame 20 places the line outside the right edge. Frames 22 and 27 lose tracking during visibly blurred pose transitions. The last 31 settled frames are all tracked, with image error between +5.3 and +5.7 px and heading +0.375 degrees.
+
+This is substantially more stable than the partial-track test and supports proceeding to bounded low-speed steering calibration, not unrestricted autonomous recovery. The left-camera visibility limit and motion-blur loss still require explicit handling. Maintain stop-on-loss in the initial autonomous controller; any heading-based reacquisition mode must be bounded and physically tested separately. The one-second diagnostic sampling rate does not establish performance at the eventual motor-control rate.
+
 ## Phase 3: steering calibration at low speed
 
 Implement a bounded motor-test mode with explicit operator start and a fixed short duration for each command.
+
+`calibrate_motors.py` now implements one trial per invocation: `stop`, `forward`, `left`, or `right`. Without `--execute` it only prints a command preview and does not import hardware libraries. Physical execution initializes the IMU and motor controller, checks that the serial port is open, requests zero motor commands, configures the 200 ms timeout and ramping 8 (matching manual control), and requires typing `RUN` before the trial. Ramping is a persistent hardware setting.
+
+Initial settings are speed command 20, steering magnitude 6, and a 0.5-second command pulse. These are uncalibrated command values, not a measured speed or guaranteed low physical speed. Each run stops at the deadline and observes heading for another 0.5 seconds with repeated stop commands. Limits are speed <=35, steering <=15, duration <=2 seconds, and a default 15-degree heading-change abort. Sensor/loop delays over 100 ms or unavailable heading abort rather than resume driving. `Ctrl+C`, termination, and hangup signals request stopping; a remote-shell disconnect is not guaranteed to deliver a signal. The motor timeout must still be verified on hardware.
+
+First physical test sequence, one command at a time:
+
+```bash
+python calibrate_motors.py --trial stop --execute
+python calibrate_motors.py --trial forward --execute
+python calibrate_motors.py --trial left --execute
+python calibrate_motors.py --trial right --execute
+```
+
+Stop other motor-control programs, clear the area, and keep a physical stop accessible. Verify zero commands with the stop trial; then run forward and confirm the robot stops before proceeding to steering. Reposition straight between trials. If motion is unexpected or stopping fails, end testing rather than execute the next command. Record approximate distance, actual turn direction, and stopping behavior at the note prompt. Speed 20 may not overcome motor deadband; report this rather than immediately increasing several parameters. The tool saves each trial's CSV and operator note under `motor_calibration/trial_*/`. Upload completed trials for analysis.
+
+Seven simulated regression checks passed for direction/deadline behavior, missing sensor readings after motion, heading limits, interruption after motion, delayed loops, slow sensor reads, and logging failure. Run `python -m unittest discover -s tests -p 'test_calibrate_motors.py'`. These checks establish software behavior only; physical stopping, serial timeout, direction, and steering strength remain unvalidated.
 
 1. Verify stop behavior before forward motion.
 2. Establish a low forward speed that moves reliably on the track.
