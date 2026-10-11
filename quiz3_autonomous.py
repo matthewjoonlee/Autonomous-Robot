@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 import math
 from pathlib import Path
+import select
 import signal
 import sys
 import time
@@ -58,7 +59,7 @@ def choose_command(error, heading, confidence, status, sample_age, settings=Sett
 
 
 def control_loop(camera, imu, saber, reference, zero, duration, settings, records, frames,
-                 clock=time.monotonic, sleep=time.sleep):
+                 clock=time.monotonic, sleep=time.sleep, finish_requested=None, frame_interval=0.25):
     """Sample before each command; latch any fault by exiting and stopping.
 
     No disk writes or console printing while motors are being commanded. Keep
@@ -76,6 +77,8 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
     count = 0
     try:
         while clock() < deadline:
+            if finish_requested is not None and finish_requested():
+                return "finish_marker"
             capture_start = clock()
             frame = cv2.cvtColor(camera.capture_array(), cv2.COLOR_BGRA2BGR)
             last_frame = frame
@@ -90,12 +93,15 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
                    "speed": 0, "raw_turn": 0, "physical_turn": 0,
                    "target_heading_deg": None, "state": "checking"}
             records.append(row)
-            if now - start - last_saved >= 0.25:
+            if now - start - last_saved >= frame_interval:
                 frames.append((count, frame.copy()))
                 last_saved = now - start
             if now >= deadline:
                 row["state"] = "duration_complete"
                 break
+            if finish_requested is not None and finish_requested():
+                row["state"] = "finish_marker"
+                return "finish_marker"
             if now - last_command > settings.max_sample_age:
                 row["state"] = "loop_delayed"
                 raise RuntimeError("Control loop delayed; refusing to resume motion")
@@ -112,6 +118,7 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
             last_command = clock()
             count += 1
             sleep(max(0, min(0.04 - (clock() - capture_start), deadline - clock())))
+        return "duration_complete"
     finally:
         if saber is not None:
             saber.stop()
@@ -133,17 +140,46 @@ def save_results(output, records, frames, outcome):
     (output / "outcome.json").write_text(json.dumps(outcome, indent=2) + "\n")
 
 
-def main():
+def finish_entered():
+    """Nonblocking terminal stop at the marked finish; EOF also stops safely."""
+    if select.select([sys.stdin], [], [], 0)[0]:
+        if not sys.stdin.readline():
+            raise RuntimeError("Remote input closed; run stopped")
+        return True
+    return False
+
+
+def course_timing(distance_ft, estimated_speed_cm_s):
+    nominal = distance_ft * 30.48 / estimated_speed_cm_s
+    # An operator marks actual completion; this is only a bounded fallback.
+    return nominal, min(30.0, nominal * 2.0)
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true", help="enable physical motor commands")
-    parser.add_argument("--duration", type=positive_number, default=3.0, help="seconds, maximum 10")
+    parser.add_argument("--duration", type=positive_number, help="seconds, maximum 10; default 3")
+    parser.add_argument("--trial", choices=["straight", "left", "right", "nudge"], default="straight")
+    parser.add_argument("--distance-ft", type=positive_number,
+                        help="marked course length, maximum 5 ft; press Enter at finish")
+    parser.add_argument("--estimated-speed-cm-s", type=positive_number, default=11.0,
+                        help="provisional time estimate only; default 11 from forward trial")
     parser.add_argument("--speed", type=bounded_int(1, 25), default=25)
     parser.add_argument("--max-turn", type=bounded_int(1, 10), default=10)
     parser.add_argument("--camera", type=int)
     parser.add_argument("--output", type=Path, default=Path("centering_results"))
-    args = parser.parse_args()
-    if args.duration > 10:
+    args = parser.parse_args(argv)
+    if args.duration is not None and args.duration > 10:
         parser.error("--duration must be <= 10 seconds for initial testing")
+    nominal = None
+    if args.distance_ft is not None:
+        if args.distance_ft > 5 or args.duration is not None:
+            parser.error("--distance-ft must be <= 5 and cannot be combined with --duration")
+        if args.speed != 25:
+            parser.error("course timing currently supports only calibrated speed command 25")
+        nominal, args.duration = course_timing(args.distance_ft, args.estimated_speed_cm_s)
+    else:
+        args.duration = args.duration or 3.0
     if args.camera is not None and args.camera < 0:
         parser.error("--camera must be nonnegative")
     settings = Settings(speed=args.speed, max_turn=args.max_turn)
@@ -152,6 +188,9 @@ def main():
     output = None
     records, frames = [], []
     outcome = {"execute": args.execute, "duration_s": args.duration,
+               "trial": args.trial, "requested_distance_ft": args.distance_ft,
+               "nominal_time_estimate_s": nominal, "distance_measured": False,
+               "estimated_speed_cm_s": args.estimated_speed_cm_s if nominal is not None else None,
                "settings": settings.__dict__, "reason": "initialization_failed"}
     handlers = {}
 
@@ -189,7 +228,10 @@ def main():
             saber.set_ramping(8)
         print(f"{'POWERED' if args.execute else 'MOTOR-FREE'} bounded run: {args.duration}s.")
         print("Stop other control programs. Align centered/straight on continuous track.")
-        print("First powered test: no pushes. Keep a physical stop accessible; Ctrl+C stops.")
+        print("Keep a physical stop accessible; Ctrl+C stops.")
+        if nominal is not None:
+            print(f"Mark start/finish {args.distance_ft:g} ft apart. Nominal time ~{nominal:.1f}s.")
+            print(f"Press Enter at the finish. Fallback stop at {args.duration:.1f}s; distance is not measured.")
         print("Remote disconnect is not a guaranteed stop; hardware timeout is not yet verified.")
         input("Press Enter while centered and straight to capture the reference: ")
         output = args.output / datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
@@ -205,18 +247,32 @@ def main():
             "fit": reference["fit"], "width": reference["width"], "zero_heading_deg": zero,
         }, indent=2) + "\n")
         print(f"Results: {output}")
+        instructions = {
+            "straight": "Keep centered and straight; no pushes during this trial.",
+            "left": "Now slide approximately 3 cm LEFT without rotating; keep this centered reference.",
+            "right": "Now slide approximately 3 cm RIGHT without rotating; keep this centered reference.",
+            "nudge": "Start centered. After forward motion begins, apply one small sideways foot nudge.",
+        }
+        print(instructions[args.trial])
+        if args.trial != "straight":
+            print("Recovery is under test. Large rotation/line loss still stops the program.")
         answer = input("Type RUN to begin the bounded test (anything else cancels): ")
         if answer.strip() != "RUN":
             outcome["reason"] = "cancelled"
-            return 0
-        control_loop(camera, imu, saber, reference, zero, args.duration, settings, records, frames)
-        outcome["reason"] = "duration_complete"
+            return 2
+        reason = control_loop(camera, imu, saber, reference, zero, args.duration, settings, records, frames,
+                              finish_requested=finish_entered if nominal is not None else None,
+                              frame_interval=1.0 if nominal is not None else 0.25)
+        outcome["reason"] = reason
+        if nominal is not None and reason != "finish_marker":
+            print("Fallback time limit reached. Five-foot completion is unconfirmed.")
         print("Run finished; motors stopped." if args.execute else "Motor-free run finished.")
         note = input("Movement/stopping observations (Enter to skip): ")
         (output / "operator_note.txt").write_text(note + "\n")
     except (KeyboardInterrupt, EOFError):
         outcome["reason"] = "interrupted"
         print("\nInterrupted; stop requested.")
+        return 2
     except Exception as exc:
         outcome["reason"] = str(exc)
         print(f"Centering test stopped: {exc}", file=sys.stderr)

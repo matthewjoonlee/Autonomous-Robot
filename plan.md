@@ -234,6 +234,34 @@ Repeat one three-second powered run from centered and straight, with no pushes, 
 
 This validates a short centered forward trial, not recovery from displacement. Next run one bounded five-second trial starting approximately 2 cm left of the line: capture the reference and IMU zero while centered/straight, then shift the robot left without rotating it while paused at the `RUN` prompt. Do not recapture or zero from the displaced pose. Record the starting offset, correction direction, final position, and stopping. Review that trial before testing the opposite offset or introducing pushes.
 
+### Four five-foot trials requested
+
+The user requested moving directly to a full four-trial test: centered forward, left-offset recovery, right-offset recovery, and recovery from one foot nudge. `quiz3_course.py --execute` runs these trials in that order with a stop, saved logs, and explicit setup between each. A fault, cancellation, or interruption ends the suite. The same feedback controller is used; successful recovery is not assumed from the centered test.
+
+Mark a start and finish five feet (152.4 cm) apart on continuous straight track. Existing hardware interfaces provide no wheel-distance feedback. At speed command 25, the earlier 11 cm forward observation gives a provisional nominal travel time of approximately 13.9 seconds. Course mode provides a maximum approximately 27.7-second fallback time budget, capped at 30 seconds, and requires the operator to press Enter at the actual finish. The timer is not an odometer: a time-limit result does not confirm five-foot completion. `outcome.json` records the trial label, requested distance, timing estimate, stop reason, and `distance_measured: false`.
+
+For every trial, return to the start centered/straight and capture the reference before introducing an offset. Straight: leave centered, type `RUN`, and press Enter at the finish. Left/right: after the reference is captured, shift approximately 3 cm in the named direction without rotation, then type `RUN`. Nudge: start centered and apply one small sideways foot nudge after motion begins. Do not re-zero or capture the reference from the offset position. Keep a physical stop ready and stop other camera/motor programs. Large heading changes or line loss still stop this version; unvalidated blind reacquisition was not enabled.
+
+Course mode saves raw frames approximately once per second plus the final frame while retaining telemetry for every sample. Record starting displacement/nudge, visible correction, final position, travel distance, and stopping in each operator note. Startup reference files and run labels allow comparing all four runs without another code edit.
+
+Pi commands:
+
+```bash
+cd ~/code
+git pull --ff-only origin main
+python quiz3_course.py --execute
+```
+
+After the trials finish (or a fault stops the suite), upload:
+
+```bash
+git add -- centering_results/
+git commit -m "Add four five-foot lane centering trials"
+git push origin main
+```
+
+The four-trial order, stop after cancellation/fault, time-estimate conversion, and finish-stop checks before/during capture are covered by five new simulated tests. These supplement the existing controller, vision, and motor checks; physical offset and nudge recovery remain to be measured.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
