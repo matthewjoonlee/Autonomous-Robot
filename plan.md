@@ -140,6 +140,27 @@ Stop other motor-control programs, clear the area, and keep a physical stop acce
 
 Seven simulated regression checks passed for direction/deadline behavior, missing sensor readings after motion, heading limits, interruption after motion, delayed loops, slow sensor reads, and logging failure. Run `python -m unittest discover -s tests -p 'test_calibrate_motors.py'`. These checks establish software behavior only; physical stopping, serial timeout, direction, and steering strength remain unvalidated.
 
+### Initial physical motor results (October 11, 2026)
+
+Five trial logs were pulled. The first three are `stop` trials with speed/turn commands `(0, 0)`; their lack of motion is expected, not evidence that forward command 20 failed. No forward-command-20 trial is present in this upload.
+
+The last two trials command forward speed 25, turn 0 for approximately one second. The final trial's operator note is `forward 11 cm`; its peak relative heading was +0.25 degrees and final heading +0.0625 degrees. The earlier forward trial has no movement note and ends at +0.5 degrees. Neither forward trial logged an abort. These logs contain requested commands and heading, not wheel-speed measurements or acknowledgment that the motor hardware applied each command.
+
+Forward command 25 is a usable initial calibration setting based on the observed approximately 11 cm movement. Do not infer precise speed, stopping distance, or repeatability from one noted distance. Confirm prompt physical stopping, then collect left and right trials separately using `--speed 25 --turn 6 --duration 0.5`, repositioning straight between trials. Steering response and the hardware timeout remain unverified.
+
+### Initial steering direction results (October 11, 2026)
+
+- `trial_20261011_181714_081916`: labeled left, commanded speed 25 / turn -6 for 0.5 seconds. Heading increased to +1.3125 degrees at stop and settled to +1.25 degrees. Operator noted that it appeared to turn right.
+- `trial_20261011_181804_124400`: labeled right, commanded speed 25 / turn +6 for 0.5 seconds. Heading decreased to -0.1875 degrees at stop and settled to -0.3125 degrees. Operator noted a slight left turn.
+- These signs and observations suggest the physical steering convention is opposite the comments in `sabertooth.py`. The positive-turn response is small, so repeat verification before changing the interface or relying on a correction sign. Keep the validated IMU convention (positive right / negative left) unchanged.
+- Next bounded verification: retain speed 25 and duration 0.5 seconds, increase only steering magnitude to 10, and run the labeled left and right trials separately with straight repositioning. Record actual direction and stopping. If the reversal is repeatable, translate desired physical steering into Sabertooth commands explicitly in the future autonomous controller; do not silently alter manual-control behavior.
+
+### Steering reversal verified (October 11, 2026)
+
+Three additional trials used speed 25 and steering magnitude 10 for 0.5 seconds. Raw turn -10 settled at +1.5625 degrees and +3.125 degrees in two trials; the second operator note says `definitely moved slightly right`. Raw turn +10 settled at -1.125 degrees; its note says `moved to the left`. All trials completed without a logged abort.
+
+Use `sabertooth_turn = -desired_physical_turn` in the separate autonomous controller, with desired physical right positive and left negative. Preserve the validated IMU sign and existing manual-control behavior. The responses are unequal and variable, so do not assume symmetric steering gains or derive a precise model from these short pulses. Begin the next controller with bounded duration, forward command 25, conservative steering limits, and stop-on-line-loss; validate centered driving before offset recovery and foot pushes. Operator notes confirm turn direction but do not explicitly quantify physical stopping or verify the serial timeout.
+
 1. Verify stop behavior before forward motion.
 2. Establish a low forward speed that moves reliably on the track.
 3. Apply brief left and right steering commands while moving forward.
@@ -152,6 +173,38 @@ Pass condition: command directions match sensor directions, corrections are repe
 ## Phase 4: autonomous controller
 
 Implement `quiz3_autonomous.py` with separate perception and control logic plus a configuration file or command-line settings for calibrated values.
+
+### Initial bounded controller implemented
+
+`quiz3_autonomous.py` now implements a short straight-track test. Its default mode reads camera/IMU data and logs proposed commands without importing or initializing the motor controller. Physical motor commands require `--execute` and typing `RUN`. Default duration is three seconds, with a maximum of ten seconds for this initial version. Capture a fresh reference while the robot is physically centered and straight; it must pass tracking/confidence checks before the run begins. Keep that reference and IMU zero fixed during the run.
+
+The initial feedback law uses near-field normalized image error to request a heading capped at +/-4 degrees. Relative IMU heading regulates the turn toward that target. Physical positive-right steering is explicitly inverted into negative Sabertooth turn commands. Forward command is 25 and raw steering magnitude is capped at 10. Position gain 40 degrees per normalized image error, heading gain 3 turn units per degree, and an 8 px image deadband are provisional starting values, not physically tuned gains. Image error includes perspective changes from rotation; it is not interpreted as a measured lateral distance.
+
+The controller stops and exits on line loss/ambiguity, confidence below 0.65, unavailable IMU data, camera/processing or command-loop delays over 150 ms, heading reaching +/-10 degrees, runtime errors, or interruption. The motor controller requests a 200 ms serial timeout and ramping 8. There is no automatic rearm or blind line reacquisition. Sample freshness is checked through capture/processing timing with camera queueing disabled, not a hardware-synchronized camera/IMU timestamp.
+
+Avoid disk encoding and console output in the command loop: retain telemetry and selected raw frames in memory, request a motor stop, then save `readings.csv`, `outcome.json`, raw frames, and startup reference files under `centering_results/run_*/`. A forced kill can lose buffered telemetry; a remote-shell disconnect is not a guaranteed stop. Verify actual stopping and the hardware timeout separately.
+
+First test sequence on the Pi, with the robot centered and straight on continuous track:
+
+```bash
+python quiz3_autonomous.py --duration 3
+```
+
+This is motor-free. If it completes without a fault and reports proposed near-zero corrections, proceed to one powered run with no pushes and a physical stop ready:
+
+```bash
+python quiz3_autonomous.py --execute --duration 3
+```
+
+Both runs require capturing the centered reference and typing `RUN`. Do not execute the powered trial if the diagnostic run reports a timing/tracking fault. Stop other motor-control programs and cameras. Record travel, drift, correction direction, and prompt stopping at the operator-note prompt. Upload results using:
+
+```bash
+git add -- centering_results/
+git commit -m "Add initial bounded centering results"
+git push origin main
+```
+
+Nine new simulated tests passed for physical steering direction/sign conversion, straightening feedback, command limits, invalid/low-confidence/stale data, heading limits, line-loss latch, IMU loss/interruption, capture delays, run deadlines, and motor-free operation. Physical centering performance remains unvalidated. Review these first results before intentional offsets or foot pushes.
 
 Control behavior:
 
