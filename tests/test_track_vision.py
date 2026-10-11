@@ -16,6 +16,29 @@ from track_vision import DEFAULT_SESSION, detect_line, live, read_image, summari
 
 
 class TrackVisionTests(unittest.TestCase):
+    def test_powered_failure_frame_retains_line_at_control_confidence(self):
+        root = Path(__file__).resolve().parents[1]
+        run = root / "centering_results/run_20261011_183304_621915"
+        reference = detect_line(read_image(run / "reference_raw.png"))
+        reference["width"] = 640
+        detection = detect_line(read_image(run / "raw/frame_00015.png"))
+        summary = summarize(detection, reference, 0)
+        self.assertEqual(detection["status"], "tracked")
+        self.assertGreaterEqual(detection["confidence"], 0.65)
+        self.assertLess(abs(summary["near_error_px"]), 8)
+
+    def test_compact_dash_cluster_without_vertical_coverage_is_rejected(self):
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        for y in range(390, 439, 7):
+            cv2.rectangle(frame, (300, y), (309, y + 3), (0, 255, 255), -1)
+        self.assertEqual(detect_line(frame)["status"], "line_lost")
+
+    def test_sparse_compact_path_is_rejected(self):
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        for y in (350, 370, 390, 410, 430):
+            cv2.rectangle(frame, (300, y), (309, y + 4), (0, 255, 255), -1)
+        self.assertEqual(detect_line(frame)["status"], "line_lost")
+
     def test_original_centered_images_remain_detectable(self):
         root = Path(__file__).resolve().parents[1]
         for index in (1, 2, 3):

@@ -218,6 +218,16 @@ The operator note says `Didn't really move`; no motor controller was initialized
 
 The final raw frame visibly retains the yellow line. Reinspection finds seven accepted collinear dash centers with full dark-track support, but their vertical span is approximately 0.167 of image height, below the detector's fixed 0.18 requirement. Some other dashes are excluded by the width/height rule near a tile seam. This is a detector coverage rejection while moving, not evidence that the robot departed the line or that correction gains are wrong. Revise and regression-test coverage/geometry handling against this real failure frame before repeating a powered run; retain stop-on-loss behavior.
 
+### Powered-frame coverage fix
+
+The operator confirmed that the robot physically stopped promptly after the first powered fault. This verifies stopping in that observed case, not the independent hardware timeout.
+
+The detector now accepts a shorter span (at least 0.14 image height) only when at least six accepted dashes support the fit and their vertical extent contains the near-field measurement row. Sparse fits retain the 0.18 minimum. Dark track support, geometry filtering, ambiguity rejection, and stop-on-loss remain enforced. Confidence weights the stronger near-field support so a valid compact fit is not immediately rejected by the controller's unchanged 0.65 threshold.
+
+The former failure frame now tracks at approximately 0.904 confidence with near-zero reference error. All four stored raw frames from the powered trial pass the controller's vision checks. Replaying the previous 60-frame continuous-track run preserves all tracked/line-loss classifications. All 29 regression checks passed, including the real failure frame and rejection of sparse compact paths and tightly clustered speckles.
+
+Repeat one three-second powered run from centered and straight, with no pushes, using `python quiz3_autonomous.py --execute --duration 3`. Upload `centering_results/` after recording movement and stopping observations. The software fix is validated on saved frames; moving performance beyond the previous 0.73 seconds still needs physical verification.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.

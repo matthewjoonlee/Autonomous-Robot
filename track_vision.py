@@ -91,7 +91,12 @@ def detect_line(frame):
         if len(selected) < 4:
             continue
         span = float(np.ptp(selected[:, 1]))
-        if span < 0.18 or selected[:, 1].max() < 0.82:
+        # Perspective and tile seams can shorten the accepted dash span while
+        # moving. Allow a compact fit only with stronger dash-count support and
+        # actual coverage of the row where the controller measures position.
+        dense_near = (len(selected) >= 6 and span >= 0.14
+                      and selected[:, 1].min() <= NEAR_Y <= selected[:, 1].max())
+        if (span < 0.18 and not dense_near) or selected[:, 1].max() < 0.82:
             continue
         if path_track_support(hsv, slope, intercept,
                               selected[:, 1].min(), selected[:, 1].max()) < 0.80:
@@ -109,7 +114,13 @@ def detect_line(frame):
             return result
     residual = float(np.sqrt(np.mean(
         (points[inliers, 0] - (slope * points[inliers, 1] + intercept)) ** 2)))
-    confidence = min(1.0, inliers.sum() / 7) * min(1.0, span / 0.30) * max(0, 1 - residual / 0.018)
+    selected = points[inliers]
+    dense_near = (len(selected) >= 6 and span >= 0.14
+                  and selected[:, 1].min() <= NEAR_Y <= selected[:, 1].max())
+    # Give the compact, well-supported near-field case adequate quality weight;
+    # otherwise the controller would reject it despite accepting the fit here.
+    coverage = min(1.0, span / (0.18 if dense_near else 0.30))
+    confidence = min(1.0, inliers.sum() / 7) * coverage * max(0, 1 - residual / 0.018)
     if confidence < 0.45:
         return result
     result.update(status="tracked", confidence=float(confidence),
