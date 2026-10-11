@@ -16,6 +16,16 @@ from track_vision import DEFAULT_SESSION, detect_line, live, read_image, summari
 
 
 class TrackVisionTests(unittest.TestCase):
+    def test_blurred_course_failure_frame_is_tracked(self):
+        root = Path(__file__).resolve().parents[1]
+        run = root / "centering_results/run_20261011_184441_221716"
+        reference = detect_line(read_image(run / "reference_raw.png"))
+        reference["width"] = 640
+        detection = detect_line(read_image(run / "raw/frame_00010.png"))
+        self.assertEqual(detection["status"], "tracked")
+        self.assertGreaterEqual(detection["confidence"], 0.65)
+        self.assertLess(abs(summarize(detection, reference)["near_error_px"]), 8)
+
     def test_powered_failure_frame_retains_line_at_control_confidence(self):
         root = Path(__file__).resolve().parents[1]
         run = root / "centering_results/run_20261011_183304_621915"

@@ -1,11 +1,13 @@
 """Feedback-direction and bounded-loop checks before physical centering tests."""
 
 import unittest
+from dataclasses import replace
+from unittest.mock import patch
 
 import cv2
 import numpy as np
 
-from quiz3_autonomous import Settings, choose_command, control_loop
+from quiz3_autonomous import Settings, choose_command, configure_motion_exposure, control_loop
 from track_vision import DEFAULT_SESSION, detect_line, read_image
 
 
@@ -96,16 +98,72 @@ class CenteringTests(unittest.TestCase):
         return (Camera(frames, clock, delay), IMU(headings), Motors(clock),
                 reference, clock, [], [])
 
-    def test_line_loss_latches_stop_after_first_command(self):
+    def test_persistent_line_loss_stops_without_resuming(self):
         good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
         bad = np.zeros_like(good)
-        camera, imu, motors, reference, clock, rows, frames = self.setup_loop([good, bad, good], [0, 0, 0])
-        with self.assertRaisesRegex(RuntimeError, "Tracking fault"):
-            control_loop(camera, imu, motors, reference, 0, 1, Settings(), rows, frames, clock, clock.sleep)
+        camera, imu, motors, reference, clock, rows, frames = self.setup_loop(
+            [good] + [bad] * 40, [0] * 41)
+        with self.assertRaisesRegex(RuntimeError, "did not recover"):
+            control_loop(camera, imu, motors, reference, 0, 2, Settings(), rows, frames, clock, clock.sleep)
         self.assertEqual(len(motors.commands), 1)
         self.assertTrue(motors.stops)
         self.assertEqual(rows[-1]["speed"], 0)
-        self.assertEqual(frames[-1][0], 1)
+        self.assertEqual(rows[-1]["state"], "reacquiring")
+
+    def test_transient_blur_stops_until_three_valid_frames(self):
+        good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
+        bad = np.zeros_like(good)
+        camera, imu, motors, reference, clock, rows, frames = self.setup_loop(
+            [good, bad, good, good, good, good, good], [0] * 7)
+        control_loop(camera, imu, motors, reference, 0, 0.24, Settings(), rows, frames, clock, clock.sleep)
+        self.assertEqual([row["state"] for row in rows[:5]],
+                         ["driving", "reacquiring", "reacquiring", "reacquiring", "driving"])
+        self.assertTrue(all(row["speed"] == 0 for row in rows[1:4]))
+        self.assertTrue(motors.stops)
+        self.assertGreaterEqual(motors.commands[1][0], 0.16)
+
+    def test_repeated_interruptions_are_bounded(self):
+        good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
+        bad = np.zeros_like(good)
+        camera, imu, motors, reference, clock, rows, frames = self.setup_loop(
+            [good, bad, good, good, good, bad], [0] * 6)
+        with self.assertRaisesRegex(RuntimeError, "Repeated tracking"):
+            control_loop(camera, imu, motors, reference, 0, 1,
+                         replace(Settings(), max_reacquisitions=1), rows, frames, clock, clock.sleep)
+        self.assertTrue(motors.stops)
+
+    def test_manual_exposure_gain_is_limited_and_logged(self):
+        class ExposureCamera:
+            camera_controls = {"AeEnable": (False, True, None), "ExposureTime": (100, 40000, 10000),
+                               "AnalogueGain": (1.0, 16.0, 1.0)}
+
+            def __init__(self):
+                self.requested = None
+
+            def capture_metadata(self):
+                return {"ExposureTime": 15000, "AnalogueGain": 4.0, "DigitalGain": 1.0}
+
+            def set_controls(self, requested):
+                self.requested = requested
+
+        camera = ExposureCamera()
+        with patch("quiz3_autonomous.time.sleep"):
+            result = configure_motion_exposure(camera, 5000)
+        self.assertEqual(camera.requested["ExposureTime"], 5000)
+        self.assertEqual(camera.requested["AnalogueGain"], 8)
+        self.assertFalse(camera.requested["AeEnable"])
+        self.assertTrue(result["gain_limited"])
+        self.assertEqual(result["observed"]["ExposureTime"], 15000)
+
+    def test_auto_exposure_override_does_not_set_controls(self):
+        class AutoCamera:
+            def capture_metadata(self):
+                return {"ExposureTime": 33000}
+
+            def set_controls(self, requested):
+                raise AssertionError("auto mode should not set manual controls")
+
+        self.assertEqual(configure_motion_exposure(AutoCamera(), 0)["mode"], "auto")
 
     def test_missing_imu_and_interrupt_stop(self):
         good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")

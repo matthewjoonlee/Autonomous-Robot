@@ -268,6 +268,18 @@ Only the straight trial was uploaded: `centering_results/run_20261011_184441_221
 
 The failure frame retains six accepted dashes, but their span is approximately 0.130 image height, below the new dense-fit 0.14 requirement. Other true dashes were rejected at width/height ratios around 3 or greater, including dashes split near a tile seam. The count/span and individual-shape rules still depend too strongly on dash phase and blur during motion. A broader motion/phase regression dataset and robust handling of short tracking interruptions are needed before the full suite can succeed. Any interruption recovery should stop forward commands while waiting for trustworthy new frames and remain bounded; do not continue blind forward motion or merely reduce controller confidence globally.
 
+### Motion-blur handling implemented
+
+Three changes address the course failure together:
+
+1. The yellow mask closes tiny vertical splits before extracting candidates. Dash geometry allows moderate flattening (width/height <=5 and fill >=0.45) while retaining yellow hue, dark surrounding track, dark support along the fitted path, and competing-path rejection. Six or more near-field dashes can support a span >=0.12 image height; sparse fits still need >=0.18. Both saved powered failure frames now track at approximately 0.97 confidence. The previously recorded moving frame 6 from the continuous-track diagnostic is now rejected; bounded reacquisition handles an unusable frame rather than forcing every blurred image to produce a fit.
+2. On line loss, ambiguity, or confidence below threshold, the controller immediately requests a motor stop and enters `reacquiring`. It resumes only after three consecutive trustworthy frames. Persistent loss for one second or more, more than five interruption episodes, unavailable IMU, stale data, excessive heading, or other errors end the run. Tracking waits retain the original reference/IMU zero and do not command forward movement or blind heading turns. The course time budget includes these pauses.
+3. Camera initialization requests 5000 microseconds (5 ms) exposure with manual gain estimated from settled auto-exposure metadata, bounded by hardware limits and a gain cap of 8. Explicit manual exposure/gain modes are set where available. Requested/observed exposure and gain are printed and saved in `outcome.json`. Short exposure may require more illumination; increased gain adds noise and cannot compensate arbitrarily dim lighting. Actual shutter/brightness on this Pi remains to be validated. Both programs accept `--exposure-us` (0 retains auto exposure).
+
+Picamera2 exposure controls and metadata follow the official manual: https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf. Thirty-nine regression checks pass, covering the saved blurred failure, persistent vs transient tracking loss, no motion during reacquisition, repeated-interruption bounds, gain limits, and auto-exposure override as well as the existing controller/vision/course checks. Keep speed command 25 for the next suite; higher-speed operation has not been validated.
+
+Rerun the four-trial program on the Pi with `python quiz3_course.py --execute`. Mark the five-foot finish and press Enter there, capture each reference centered/straight, then follow the left/right/nudge setup prompts. Upload `centering_results/` using the previously documented commit/push commands. Review observed camera exposure and recovery events alongside motion before increasing speed.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.

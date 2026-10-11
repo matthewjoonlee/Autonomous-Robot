@@ -28,6 +28,39 @@ class Settings:
     min_confidence: float = 0.65
     image_deadband: float = 0.0125  # 8 px at 640 px; provisional.
     max_sample_age: float = 0.15
+    reacquire_seconds: float = 1.0
+    reacquire_frames: int = 3
+    max_reacquisitions: int = 5
+
+
+def configure_motion_exposure(camera, exposure_us):
+    """Short shutter, compensated gain within hardware limits; log actual values."""
+    metadata = camera.capture_metadata()
+    if not exposure_us:
+        return {"mode": "auto", "observed": {key: metadata.get(key) for key in
+                ("ExposureTime", "AnalogueGain", "DigitalGain")}}
+    controls = camera.camera_controls
+    if not all(name in controls for name in ("ExposureTime", "AnalogueGain", "AeEnable")):
+        raise RuntimeError("Camera lacks manual exposure controls; use --exposure-us 0 for auto")
+    low, high = controls["ExposureTime"][:2]
+    exposure = max(low, min(exposure_us, high)) if high > 0 else max(low, exposure_us)
+    previous_exposure = metadata.get("ExposureTime", exposure)
+    previous_gain = metadata.get("AnalogueGain", 1.0) * metadata.get("DigitalGain", 1.0)
+    desired_gain = previous_gain * previous_exposure / exposure
+    gain_low, gain_high = controls["AnalogueGain"][:2]
+    gain = max(gain_low, min(desired_gain, gain_high, 8.0))
+    requested = {"AeEnable": False, "ExposureTime": int(exposure), "AnalogueGain": gain}
+    # Newer libcamera versions expose explicit manual mode controls (Manual=1).
+    for mode in ("ExposureTimeMode", "AnalogueGainMode"):
+        if mode in controls:
+            requested[mode] = 1
+    camera.set_controls(requested)
+    time.sleep(0.3)
+    observed = camera.capture_metadata()
+    return {"mode": "manual", "requested": requested,
+            "gain_limited": gain < desired_gain,
+            "observed": {key: observed.get(key) for key in
+                         ("ExposureTime", "AnalogueGain", "DigitalGain")}}
 
 
 def clamp(value, limit):
@@ -60,7 +93,7 @@ def choose_command(error, heading, confidence, status, sample_age, settings=Sett
 
 def control_loop(camera, imu, saber, reference, zero, duration, settings, records, frames,
                  clock=time.monotonic, sleep=time.sleep, finish_requested=None, frame_interval=0.25):
-    """Sample before each command; latch any fault by exiting and stopping.
+    """Sample before each command; pause on brief tracking loss, stop on faults.
 
     No disk writes or console printing while motors are being commanded. Keep
     diagnostic records in memory and write them only after requesting a stop.
@@ -75,6 +108,9 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
     last_frame = None
     last_frame_id = None
     count = 0
+    lost_since = None
+    good_frames = 0
+    recoveries = 0
     try:
         while clock() < deadline:
             if finish_requested is not None and finish_requested():
@@ -105,6 +141,40 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
             if now - last_command > settings.max_sample_age:
                 row["state"] = "loop_delayed"
                 raise RuntimeError("Control loop delayed; refusing to resume motion")
+            if now - capture_start > settings.max_sample_age:
+                raise RuntimeError("Camera/processing data stale")
+            if abs(delta) >= settings.abort_heading:
+                raise RuntimeError("Heading exceeded bounded test limit")
+            trustworthy = (detection["status"] == "tracked"
+                           and detection["confidence"] >= settings.min_confidence)
+            if not trustworthy or lost_since is not None:
+                # A blur frame requests a stop immediately. Reacquisition uses
+                # fresh camera samples while stopped, not blind forward motion.
+                if saber is not None:
+                    saber.stop()
+                last_command = clock()
+                if lost_since is None:
+                    recoveries += 1
+                    if recoveries > settings.max_reacquisitions:
+                        raise RuntimeError("Repeated tracking interruptions; run stopped")
+                    lost_since = now
+                    good_frames = 0
+                if trustworthy:
+                    good_frames += 1
+                else:
+                    good_frames = 0
+                row["state"] = "reacquiring"
+                if now - lost_since >= settings.reacquire_seconds:
+                    raise RuntimeError("Tracking did not recover while stopped")
+                if good_frames < settings.reacquire_frames:
+                    # Preserve interruption frames even between routine snapshots.
+                    if not frames or frames[-1][0] != count:
+                        frames.append((count, frame.copy()))
+                    count += 1
+                    sleep(max(0, min(0.04 - (clock() - capture_start), deadline - clock())))
+                    continue
+                lost_since = None
+                good_frames = 0
             try:
                 command = choose_command(summary["near_error_normalized"], delta,
                                          detection["confidence"], detection["status"],
@@ -118,6 +188,8 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
             last_command = clock()
             count += 1
             sleep(max(0, min(0.04 - (clock() - capture_start), deadline - clock())))
+        if lost_since is not None:
+            raise RuntimeError("Tracking not recovered before time limit")
         return "duration_complete"
     finally:
         if saber is not None:
@@ -167,6 +239,8 @@ def main(argv=None):
     parser.add_argument("--speed", type=bounded_int(1, 25), default=25)
     parser.add_argument("--max-turn", type=bounded_int(1, 10), default=10)
     parser.add_argument("--camera", type=int)
+    parser.add_argument("--exposure-us", type=bounded_int(0, 20000), default=5000,
+                        help="short exposure in microseconds; 0 keeps auto exposure")
     parser.add_argument("--output", type=Path, default=Path("centering_results"))
     args = parser.parse_args(argv)
     if args.duration is not None and args.duration > 10:
@@ -218,6 +292,8 @@ def main(argv=None):
         metadata = camera.capture_metadata()
         if "ColourGains" in metadata:
             camera.set_controls({"AwbEnable": False, "ColourGains": metadata["ColourGains"]})
+        outcome["camera_exposure"] = configure_motion_exposure(camera, args.exposure_us)
+        print("Camera exposure:", json.dumps(outcome["camera_exposure"], default=str))
         if args.execute:
             from sabertooth import Sabertooth
             saber = Sabertooth()

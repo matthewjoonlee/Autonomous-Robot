@@ -61,6 +61,10 @@ def detect_line(frame):
     # The original hue range included textured green surfaces (around H=42).
     # Retain the lighter yellow dashes (around H=30..33) without that green tail.
     mask = cv2.inRange(hsv, np.array([18, 85, 130]), np.array([38, 255, 255]))
+    # Rejoin tiny vertical splits in a dash (tile seams / thresholding under
+    # blur), without bridging the ordinary gaps between separate dashes.
+    kernel = np.ones((max(3, round(height / 160)), 1), dtype=np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     mask[:int(height * ROI_TOP)] = 0
     mask[int(height * ROI_BOTTOM):] = 0
     count, _, stats, centers = cv2.connectedComponentsWithStats(mask)
@@ -70,8 +74,8 @@ def detect_line(frame):
         # Reject specks, horizontal cross markings, and implausibly large blobs.
         if (area >= max(10, width * height * 0.00003)
                 and w < width * 0.12 and h < height * 0.12
-                and w / max(h, 1) < 3.0
-                and area / (w * h) >= 0.50
+                and w / max(h, 1) <= 5.0
+                and area / (w * h) >= 0.45
                 and dark_track_support(hsv, x, y, w, h) >= 0.65):
             points.append((centers[index][0] / width, centers[index][1] / height))
     points = np.array(points, dtype=float).reshape(-1, 2)
@@ -94,7 +98,7 @@ def detect_line(frame):
         # Perspective and tile seams can shorten the accepted dash span while
         # moving. Allow a compact fit only with stronger dash-count support and
         # actual coverage of the row where the controller measures position.
-        dense_near = (len(selected) >= 6 and span >= 0.14
+        dense_near = (len(selected) >= 6 and span >= 0.12
                       and selected[:, 1].min() <= NEAR_Y <= selected[:, 1].max())
         if (span < 0.18 and not dense_near) or selected[:, 1].max() < 0.82:
             continue
@@ -115,11 +119,11 @@ def detect_line(frame):
     residual = float(np.sqrt(np.mean(
         (points[inliers, 0] - (slope * points[inliers, 1] + intercept)) ** 2)))
     selected = points[inliers]
-    dense_near = (len(selected) >= 6 and span >= 0.14
+    dense_near = (len(selected) >= 6 and span >= 0.12
                   and selected[:, 1].min() <= NEAR_Y <= selected[:, 1].max())
     # Give the compact, well-supported near-field case adequate quality weight;
     # otherwise the controller would reject it despite accepting the fit here.
-    coverage = min(1.0, span / (0.18 if dense_near else 0.30))
+    coverage = min(1.0, span / (0.15 if dense_near else 0.30))
     confidence = min(1.0, inliers.sum() / 7) * coverage * max(0, 1 - residual / 0.018)
     if confidence < 0.45:
         return result
