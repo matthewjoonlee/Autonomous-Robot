@@ -40,10 +40,6 @@ class Settings:
     turn_rate: float = 40.0      # Max change in physical turn units per second.
     turn_slowdown: float = 0.0   # Speed fraction shed at full turn; 0 until lower speeds are validated.
     lost_limit: float = 3.0      # Seconds searching for an unseen lane before stopping (~42 cm).
-    # End of the track: lane seen only in the near rows (none above this image row) with no
-    # confident full-lane frame for `end_seconds`. Normal driving reaches row <= 0.67 (99%).
-    end_top_row: float = 0.68
-    end_seconds: float = 0.5
     prior_seconds: float = 0.3   # Search near the last lane fit only while it is this recent.
     max_sample_age: float = 0.15
 
@@ -196,7 +192,6 @@ class Controller:
         # Correction added to the IMU heading so it follows the image heading
         # (lane_center calibration) whenever the lane is seen; held while unseen.
         self.heading_bias = 0.0
-        self.end_since = None  # When the lane started ending short of the far rows.
 
     def observe(self, frame, imu_heading, capture_time):
         from track_vision import detect_lane, summarize
@@ -215,19 +210,11 @@ class Controller:
             self.heading_bias += settings.heading_correction * innovation
             row["image_yaw_deg"] = round(yaw, 2)
         heading = imu_heading + self.heading_bias
-        points = detection["points"]
-        short = len(points) >= 4 and points[:, 1].min() > settings.end_top_row
-        if tracker.trusted(detection, error) and not short:
-            self.end_since = None
-        elif short and self.end_since is None:
-            self.end_since = now
         seen = tracker.update(detection, error, heading, now)
         lost_for = now - tracker.seen
         row.update(heading_deg=round(heading, 2), lateral_error=round(tracker.lateral, 5),
                    lost_s=round(lost_for, 3))
         try:
-            if self.end_since is not None and now - self.end_since >= settings.end_seconds:
-                raise RuntimeError("End of lane ahead")
             command = choose_command(tracker.lateral, heading, lost_for, self.turn, now - self.last,
                                      settings)
         except RuntimeError as exc:
@@ -384,7 +371,7 @@ def leg_timing(leg_ft, estimated_speed_cm_s):
 
 
 # Faults that end one leg but not the session: the robot stops and waits to be placed.
-RECOVERABLE = ("Lane not found", "Heading exceeded", "Lane not visible at start", "End of lane ahead")
+RECOVERABLE = ("Lane not found", "Heading exceeded", "Lane not visible at start")
 
 
 def wait_for_placement(camera, settings, stopped_near=None, settle=1.5, moved_px=40, steady_px=10,

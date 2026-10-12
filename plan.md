@@ -394,6 +394,10 @@ Legs `run_20261011_222608_014418`, `222712_568548`, `222851_395272` (each starte
 - "A little off": the image shows a slight lens bend (near-half lane slope 0.03-0.15 below the far half), and in one stretch the image heading read about 4 degrees while the lateral estimate did not change, i.e. a few-degree heading bias worth roughly 2-3 cm. A quadratic fit did not improve physical consistency, so the straight-line fit stays. Plain straight legs without nudges would isolate this.
 - One frame previously labeled as a no-lane sliver (nudge run, frame 222) actually shows the dashes; relabeled.
 
+### End-of-lane stop removed
+
+In a short-track room every leg ended "End of lane ahead" about 0.5 m before the mat met the wall (leg 1 after ~147 cm; restarts nearby after 8-20 cm). By request the stop is removed: a leg now ends at the estimated distance, Enter, 3 s without the lane, or 45 degrees of rotation. Keep the end of the track clear, or press Enter, since a parked robot at the end is no longer avoided.
+
 ### Dim-room failure and lane color fix (October 11, 2026)
 
 Legs `run_20261011_223932_140284` and `223959_429264` in another room performed badly: confidence 0.3-0.6 from the first frame, lane often lost, and a wrong fit swung the robot 12 degrees away. It was not the consensus detector (on these frames older detector versions usable 5% and 14%, consensus 25%). The lane mask was: in this room the green mats are dim (brightness 119-130) and washed out, passing the "dark, unsaturated" test, so lane and mats merged; the lane itself is more saturated (about 115) than elsewhere.

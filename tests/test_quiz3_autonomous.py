@@ -250,17 +250,6 @@ class CenteringTests(unittest.TestCase):
             measure_start(Camera(frames, clock), IMU([0.0] * 10), load(), Settings(),
                           clock=clock, sleep=clock.sleep)
 
-    def test_lane_ending_ahead_stops_the_leg(self):
-        good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
-        ending = good.copy()
-        ending[:int(480 * 0.76)] = 190  # Floor beyond the end of the track: lane only in the near rows.
-        camera, imu, motors, reference, clock, rows, frames = self.setup_loop(
-            [good] * 5 + [ending] * 40, [0] * 45)
-        with self.assertRaisesRegex(RuntimeError, "End of lane ahead"):
-            control_loop(camera, imu, motors, reference, 0, 5, Settings(), rows, frames, clock, clock.sleep)
-        self.assertLess(rows[-1]["elapsed_s"], 0.04 * 5 + 0.6)  # Within ~0.5 s of the lane ending.
-        self.assertTrue(motors.stops)
-
     def test_persistent_loss_searches_then_faults(self):
         good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
         bad = np.zeros_like(good)
