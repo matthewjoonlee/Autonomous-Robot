@@ -237,7 +237,7 @@ def new_row(elapsed, frame_id, processing, summary):
 
 def control_loop(camera, imu, saber, reference, zero, duration, settings, records, recorder=None,
                  clock=time.monotonic, sleep=time.sleep, finish_requested=None,
-                 max_distance_cm=None, speed_cm_s=14.0, calibration=None):
+                 max_distance_cm=None, speed_cm_s=14.0, calibration=None, observer=None):
     """Track the lane; search for it on IMU heading when unseen; stop on faults.
 
     No disk writes or console printing while motors are being commanded. Keep
@@ -245,6 +245,8 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
     Every frame goes to the recorder (encoded off-thread) for later replay.
     Without wheel encoders, distance is estimated from commanded speed and the
     measured `speed_cm_s` at `settings.speed`; the run ends at `max_distance_cm`.
+    `observer(frame, detection, row)` runs after each decision (e.g. to update the
+    touchscreen) and must be quick.
     """
     import cv2
 
@@ -295,6 +297,8 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
                     saber.drive(command["speed"], command["raw_turn"])
             last_command = clock()
             last_speed = command["speed"]
+            if observer is not None:
+                observer(frame, detection, row)
             count += 1
             sleep(max(0, min(0.04 - (clock() - capture_start), deadline - clock())))
         return "duration_complete"
@@ -419,7 +423,7 @@ def wait_for_placement(camera, settings, stopped_near=None, settle=1.5, moved_px
 
 
 def run_leg(number, camera, imu, saber, settings, calibration, output_root, leg_ft, speed_cm_s,
-            record_every, execute, commands, clock=time.monotonic, sleep=time.sleep):
+            record_every, execute, finish_requested, clock=time.monotonic, sleep=time.sleep, observer=None):
     """One leg: stationary heading measurement, then drive up to `leg_ft`.
 
     Always returns with motors stopped and results saved; returns
@@ -452,8 +456,8 @@ def run_leg(number, camera, imu, saber, settings, calibration, output_root, leg_
             recorder = FrameRecorder(every=record_every)
         outcome["reason"] = control_loop(
             camera, imu, saber, reference, zero, duration, settings, records, recorder, clock, sleep,
-            finish_requested=lambda: commands() is not None, max_distance_cm=leg_ft * 30.48,
-            speed_cm_s=speed_cm_s, calibration=calibration)
+            finish_requested=finish_requested, max_distance_cm=leg_ft * 30.48,
+            speed_cm_s=speed_cm_s, calibration=calibration, observer=observer)
     except RuntimeError as exc:
         outcome["reason"] = str(exc)
         if not str(exc).startswith(RECOVERABLE):
@@ -491,7 +495,8 @@ def run_session(camera, imu, saber, settings, calibration, output_root, leg_ft=1
             break
         legs += 1
         _, stopped_near = run_leg(legs, camera, imu, saber, settings, calibration, output_root, leg_ft,
-                                  speed_cm_s, record_every, execute, commands, clock, sleep)
+                                  speed_cm_s, record_every, execute, lambda: commands() is not None,
+                                  clock, sleep)
     return legs
 
 

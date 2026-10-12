@@ -410,6 +410,12 @@ Measured across the four rooms: mats hue 42-57 at brightness 112-163; lane brigh
 
 Usable frames: new room 25% to 93% (median confidence 0.82); previous session 77% to 92%; all older footage stays at 100% (confidence 0.91). Dash-fit agreement max 2.5 px. Replay: the two bad legs track 89% and 100%; end-of-lane triggers at all three track ends and nowhere else. Eight new-room frames added to the regression set (76 labels).
 
+### Touchscreen app and the "not moving" session
+
+Five legs (`run_20261011_2255*`-`2257*`, motors enabled) logged up to 23 s of "driving" (speed 25, turn 7) while the camera image and IMU heading never changed: first and last frames identical. The robot was not moving; the software kept commanding it, which looked like a freeze, and three legs ended by an outside interrupt. Most likely a drained battery (speed 25 is near the minimum that moves the robot) or motor power off.
+
+`lane_app.py` is the simple touchscreen program, by request: the screen shows the camera with the detected lane (green) and calibrated center (cyan). START measures position (~0.5 s still), then centers on the lane and drives straight until STOP, the leg distance (15 ft), or a fault; it then waits for the next START. QUIT exits. There is no automatic start on placement. While driving, if the commanded robot shows no image or heading change for 2 s, the screen shows "NOT MOVING - check motor power / battery". Runs save like legs (replay and metrics unchanged). `quiz3_autonomous.py` keeps the terminal session mode. Tests drive START/STOP/QUIT with a fake screen, a no-lane start, the no-motion warning, and `main` with fake hardware.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
