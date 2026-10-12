@@ -132,6 +132,85 @@ def detect_line(frame):
     return result
 
 
+def detect_lane(frame, prior=None, gate=0.10):
+    """Fit the centerline of the dark lane from per-row midpoints.
+
+    Blur barely moves the middle of a wide dark strip, so rows that fail are
+    simply skipped instead of rejecting the frame. Yellow counts as lane so the
+    dashes (smeared wide by rotation blur) do not split it. With a prior fit,
+    each row searches near the predicted center; without one, rows are followed
+    bottom-up from the widest dark run, which near the robot is the lane rather
+    than shadowed carpet patches. A run cut off by the image border (rotated
+    or displaced robot) has a biased midpoint, so those rows use the dash
+    pixels inside the run instead. Runs spanning most of the width (crossing
+    bands) are ignored.
+    """
+    height, width = frame.shape[:2]
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    yellow = cv2.inRange(hsv, np.array([18, 85, 130]), np.array([38, 255, 255])) > 0
+    lane = ((hsv[..., 2] < 125) & (hsv[..., 1] < 120)) | yellow
+    kernel = np.ones((1, max(3, round(width / 40))), dtype=np.uint8)
+    lane = cv2.morphologyEx(lane.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
+    rows = range(int(height * ROI_BOTTOM) - 1, int(height * ROI_TOP), -4)
+    points = []
+    previous = None
+    for y in rows:
+        transitions = np.diff(np.concatenate(([0], lane[y].astype(np.int8), [0])))
+        starts, ends = np.flatnonzero(transitions == 1), np.flatnonzero(transitions == -1)
+        centers = []
+        for a, b in zip(starts, ends):
+            if not 0.05 * width < b - a < 0.7 * width:
+                continue
+            if 0 < a and b < width:
+                centers.append(((a + b) / 2, b - a))
+                continue
+            dash = np.flatnonzero(yellow[y, a:b])
+            if 0 < len(dash) < 0.08 * width:
+                centers.append((a + dash.mean(), b - a))
+        if not centers:
+            continue
+        if prior is not None:
+            expected = (prior[0] * y / height + prior[1]) * width
+            allowed = gate * width
+        elif previous is not None:
+            # Row-to-row: the lane drifts at most ~1 px sideways per row.
+            expected = previous[0]
+            allowed = 0.02 * width + (previous[1] - y)
+        else:
+            center = max(centers, key=lambda candidate: candidate[1])[0]
+            expected, allowed = center, 0
+        center = min((candidate[0] for candidate in centers), key=lambda value: abs(value - expected))
+        if abs(center - expected) > allowed:
+            continue
+        previous = (center, y)
+        points.append((center / width, y / height))
+    points = np.array(points, dtype=float).reshape(-1, 2)
+    result = {"status": "line_lost", "confidence": 0.0, "points": points,
+              "fit": None, "inliers": np.zeros(len(points), dtype=bool)}
+    if len(points) < 6:
+        return result
+    slope, intercept = np.polyfit(points[:, 1], points[:, 0], 1)
+    residuals = np.abs(points[:, 0] - (slope * points[:, 1] + intercept))
+    inliers = residuals < max(0.012, 3 * np.median(residuals))
+    if inliers.sum() < 6:
+        return result
+    selected = points[inliers]
+    slope, intercept = np.polyfit(selected[:, 1], selected[:, 0], 1)
+    residual = float(np.sqrt(np.mean((selected[:, 0] - (slope * selected[:, 1] + intercept)) ** 2)))
+    span = float(np.ptp(selected[:, 1]))
+    coverage = min(1.0, inliers.sum() / (0.6 * len(rows))) * min(1.0, span / 0.25)
+    confidence = coverage * max(0.0, 1 - residual / 0.02)
+    result["inliers"] = inliers
+    if confidence < 0.3:
+        return result
+    result.update(status="tracked", confidence=float(confidence),
+                  fit=(float(slope), float(intercept)))
+    return result
+
+
+DETECTORS = {"lane": detect_lane, "dashes": detect_line}
+
+
 def read_image(path):
     frame = cv2.imread(str(path))
     if frame is None:
@@ -192,7 +271,7 @@ def save_frame(path, frame):
         raise RuntimeError(f"Cannot save frame: {path}")
 
 
-def offline(session, reference, output):
+def offline(session, reference, output, detect):
     with (session / "captures.csv").open(newline="") as source:
         captures = list(csv.DictReader(source))
     if not captures:
@@ -203,7 +282,7 @@ def offline(session, reference, output):
         frame = read_image(session / name)
         raw_heading = capture.get("delta_after_deg", "")
         heading = float(raw_heading) if raw_heading else None
-        detection = detect_line(frame)
+        detection = detect(frame)
         summary = summarize(detection, reference, heading)
         row = {"image": name, "pose": capture["pose"], **summary}
         rows.append(row)
@@ -218,6 +297,7 @@ def offline(session, reference, output):
 def live(args, reference, output):
     from picamera2 import Picamera2
     from imu_controller import IMUDevice
+    detect = DETECTORS[getattr(args, "detector", "lane")]
     camera = imu = None
     started = False
     try:
@@ -239,7 +319,7 @@ def live(args, reference, output):
         raw_output.mkdir()
         reference_frame = cv2.cvtColor(camera.capture_array(), cv2.COLOR_BGRA2BGR)
         save_frame(output / "reference_raw.png", reference_frame)
-        starting_detection = detect_line(reference_frame)
+        starting_detection = detect(reference_frame)
         if args.reference is None:
             # A fresh explicitly aligned reference avoids differences between
             # the old still photos and today's camera pose/exposure.
@@ -265,7 +345,7 @@ def live(args, reference, output):
                 frame = cv2.cvtColor(camera.capture_array(), cv2.COLOR_BGRA2BGR)
                 heading = read_heading(imu)
                 delta = signed_delta(heading, zero, imu.SIGN) if heading is not None else None
-                detection = detect_line(frame)
+                detection = detect(frame)
                 summary = summarize(detection, reference, delta)
                 name = f"frame_{count:05d}.jpg"
                 raw_name = f"raw/frame_{count:05d}.png"
@@ -303,6 +383,8 @@ def main():
     parser.add_argument("--interval", type=positive_number, default=1.0,
                         help="live seconds between saved diagnostic frames")
     parser.add_argument("--duration", type=positive_number)
+    parser.add_argument("--detector", choices=sorted(DETECTORS), default="lane",
+                        help="lane centerline (controller default) or individual dashes")
     parser.add_argument("--output", type=Path, default=Path("vision_results"))
     args = parser.parse_args()
     if args.camera is not None and args.camera < 0:
@@ -318,7 +400,7 @@ def main():
         if not args.live or args.reference is not None:
             path = args.reference or args.session / "001_centered_straight.jpg"
             frame = read_image(path)
-            reference = detect_line(frame)
+            reference = DETECTORS[args.detector](frame)
             if reference["status"] != "tracked":
                 raise RuntimeError("Cannot reliably detect the centered reference line")
             reference["width"] = frame.shape[1]
@@ -328,7 +410,7 @@ def main():
         if args.live:
             live(args, reference, output)
         else:
-            offline(args.session, reference, output)
+            offline(args.session, reference, output, DETECTORS[args.detector])
     except (KeyboardInterrupt, EOFError):
         print("\nStopped. Completed results are saved.")
     except Exception as exc:

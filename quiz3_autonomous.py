@@ -2,7 +2,7 @@
 
 import argparse
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import json
 import math
@@ -25,12 +25,46 @@ class Settings:
     heading_gain: float = 3.0    # Physical turn units per degree; provisional.
     max_target_heading: float = 4.0
     abort_heading: float = 10.0
-    min_confidence: float = 0.65
-    image_deadband: float = 0.0125  # 8 px at 640 px; provisional.
+    min_confidence: float = 0.5
+    smoothing: float = 0.5       # Weight of each new lane measurement; 1 disables filtering.
+    turn_rate: float = 40.0      # Max change in physical turn units per second.
+    turn_slowdown: float = 0.0   # Speed fraction shed at full turn; 0 until lower speeds are validated.
+    coast_full: float = 0.3      # Seconds of lane loss at full speed, holding IMU heading.
+    coast_stop: float = 1.0      # Seconds of lane loss by which speed has ramped to zero.
+    coast_decay: float = 0.5     # Seconds; held lane offset relaxes toward straight while coasting.
+    lost_limit: float = 3.0      # Seconds of lane loss (stopped after coast_stop) before a fault.
+    resume_frames: int = 2       # Consecutive lane frames needed to restart after a full stop.
+    prior_seconds: float = 0.3   # Search near the last lane fit only while it is this recent.
     max_sample_age: float = 0.15
-    reacquire_seconds: float = 1.0
-    reacquire_frames: int = 3
-    max_reacquisitions: int = 5
+
+
+TUNABLE = ("position_gain", "heading_gain", "max_target_heading", "min_confidence", "smoothing",
+           "turn_rate", "turn_slowdown", "coast_full", "coast_stop", "coast_decay",
+           "resume_frames", "prior_seconds")
+
+
+def tuned(settings, overrides):
+    """Apply KEY=VALUE tuning overrides. Speed, turn, and safety limits are not tunable here."""
+    changes = {}
+    for item in overrides:
+        key, separator, text = item.partition("=")
+        if not separator or key not in TUNABLE:
+            raise ValueError(f"--set takes KEY=VALUE with KEY one of: {', '.join(TUNABLE)}")
+        kind = type(getattr(settings, key))
+        try:
+            value = kind(text)
+        except ValueError:
+            raise ValueError(f"--set {key} needs a {kind.__name__}") from None
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"--set {key} must be a nonnegative number")
+        changes[key] = value
+    result = replace(settings, **changes)
+    if not (0 < result.smoothing <= 1 and 0 <= result.turn_slowdown < 1
+            and 0 < result.min_confidence <= 1 and result.max_target_heading < result.abort_heading
+            and result.coast_full < result.coast_stop < result.lost_limit
+            and result.turn_rate > 0 and result.coast_decay > 0 and result.resume_frames >= 1):
+        raise ValueError("--set values out of range (check smoothing, coast times, turn_rate)")
+    return result
 
 
 def configure_motion_exposure(camera, exposure_us):
@@ -67,71 +101,145 @@ def clamp(value, limit):
     return max(-limit, min(limit, value))
 
 
-def choose_command(error, heading, confidence, status, sample_age, settings=Settings()):
+def choose_command(offset, heading, lost_for, previous_turn, dt, settings=Settings()):
     """Positive image error requests physical right, hence negative raw turn.
 
-    Image error includes both translation and perspective changes from rotation.
-    It is feedback relative to the centered reference, not a distance estimate.
+    `offset` is the filtered image error relative to the centered reference; it
+    includes both translation and perspective changes from rotation, so it is
+    feedback, not a distance estimate. Relative IMU heading tracks the requested
+    heading, so steering stays smooth and keeps working while the lane is
+    briefly unseen. Speed ramps to zero as lane loss persists; the turn command
+    changes at a bounded rate and is rounded only for the motor command.
     """
-    if status != "tracked":
-        raise RuntimeError(f"Tracking fault: {status}")
-    values = (error, heading, confidence, sample_age)
+    values = (offset, heading, lost_for, previous_turn, dt)
     if any(value is None or not math.isfinite(value) for value in values):
         raise RuntimeError("Invalid camera/IMU reading")
-    if confidence < settings.min_confidence:
-        raise RuntimeError("Tracking confidence too low")
-    if sample_age < 0 or sample_age > settings.max_sample_age:
-        raise RuntimeError("Camera/processing data stale")
     if abs(heading) >= settings.abort_heading:
         raise RuntimeError("Heading exceeded bounded test limit")
-    effective_error = 0 if abs(error) <= settings.image_deadband else error
-    target = clamp(settings.position_gain * effective_error, settings.max_target_heading)
-    physical_turn = int(round(clamp(settings.heading_gain * (target - heading), settings.max_turn)))
-    return {"speed": settings.speed, "raw_turn": -physical_turn,
-            "physical_turn": physical_turn, "target_heading_deg": target}
+    if lost_for >= settings.lost_limit:
+        raise RuntimeError("Lane not found; run stopped")
+    if lost_for <= settings.coast_full:
+        scale = 1.0
+    else:
+        scale = max(0.0, (settings.coast_stop - lost_for) / (settings.coast_stop - settings.coast_full))
+    target = clamp(settings.position_gain * offset, settings.max_target_heading)
+    desired = clamp(settings.heading_gain * (target - heading), settings.max_turn)
+    turn = previous_turn + clamp(desired - previous_turn, settings.turn_rate * dt) if scale else 0.0
+    speed = int(round(settings.speed * scale
+                      * (1 - settings.turn_slowdown * abs(turn) / settings.max_turn)))
+    physical_turn = int(round(turn))
+    return {"speed": speed, "raw_turn": -physical_turn, "physical_turn": physical_turn,
+            "turn": round(turn, 3), "target_heading_deg": round(target, 3)}
 
 
-def control_loop(camera, imu, saber, reference, zero, duration, settings, records, frames,
-                 clock=time.monotonic, sleep=time.sleep, finish_requested=None, frame_interval=0.25):
-    """Sample before each command; pause on brief tracking loss, stop on faults.
+class LaneTracker:
+    """Smoothed lane offset that survives unusable frames.
+
+    Trusted detections blend into the estimate. Unusable frames leave it in
+    place, relaxing toward zero (straight along the track) while coasting.
+    """
+
+    def __init__(self, reference, now, settings):
+        self.settings = settings
+        self.fit = reference["fit"]
+        self.offset = 0.0
+        self.seen = self.updated = now
+        self.streak = 0
+
+    def prior(self, now):
+        return self.fit if now - self.seen <= self.settings.prior_seconds else None
+
+    def update(self, detection, error, now):
+        settings = self.settings
+        elapsed, self.updated = now - self.updated, now
+        if (detection["status"] == "tracked" and detection["confidence"] >= settings.min_confidence
+                and error is not None and math.isfinite(error)):
+            self.offset += settings.smoothing * (error - self.offset)
+            self.fit, self.seen = detection["fit"], now
+            self.streak += 1
+            return True
+        self.offset *= math.exp(-elapsed / settings.coast_decay)
+        self.streak = 0
+        return False
+
+
+class Controller:
+    """Per-frame lane estimate and drive decision, shared by the robot and replay.
+
+    `observe` measures the lane; `decide` turns that into a command and state.
+    The caller sends the command and owns timing and hardware safety checks, so
+    a replay of recorded frames makes exactly the decisions the robot made.
+    """
+
+    def __init__(self, reference, now, settings):
+        self.reference, self.settings = reference, settings
+        self.tracker = LaneTracker(reference, now, settings)
+        self.turn = 0.0
+        self.stopped = False
+        self.last = now
+
+    def observe(self, frame, heading, capture_time):
+        from track_vision import detect_lane, summarize
+        detection = detect_lane(frame, self.tracker.prior(capture_time))
+        return detection, summarize(detection, self.reference, heading)
+
+    def decide(self, detection, summary, heading, now, row):
+        """Fill `row` with the decision; faults raise after naming the state."""
+        tracker, settings = self.tracker, self.settings
+        seen = tracker.update(detection, summary["near_error_normalized"], now)
+        lost_for = now - tracker.seen
+        row.update(filtered_error=round(tracker.offset, 5), lost_s=round(lost_for, 3))
+        try:
+            command = choose_command(tracker.offset, heading, lost_for, self.turn, now - self.last, settings)
+        except RuntimeError as exc:
+            row["state"] = str(exc)
+            raise
+        self.last = now
+        if self.stopped and tracker.streak < settings.resume_frames:
+            command.update(speed=0, raw_turn=0, physical_turn=0, turn=0.0)
+        self.stopped = command["speed"] == 0
+        self.turn = command["turn"]
+        row.update(command, state="waiting" if self.stopped else "driving" if seen else "coasting")
+        return command
+
+
+def new_row(elapsed, frame_id, processing, summary):
+    return {"elapsed_s": round(elapsed, 4), "frame_id": frame_id,
+            "processing_s": round(processing, 4), **summary,
+            "filtered_error": None, "lost_s": None,
+            "speed": 0, "raw_turn": 0, "physical_turn": 0, "turn": 0.0,
+            "target_heading_deg": None, "state": "checking"}
+
+
+def control_loop(camera, imu, saber, reference, zero, duration, settings, records, recorder=None,
+                 clock=time.monotonic, sleep=time.sleep, finish_requested=None):
+    """Drive through brief lane loss on IMU heading; slow, stop, then fault if it persists.
 
     No disk writes or console printing while motors are being commanded. Keep
     diagnostic records in memory and write them only after requesting a stop.
+    Every frame goes to the recorder (encoded off-thread) for later replay.
     """
     import cv2
-    from track_vision import detect_line, summarize
 
     start = clock()
     deadline = start + duration
     last_command = start
-    last_saved = -1.0
-    last_frame = None
-    last_frame_id = None
     count = 0
-    lost_since = None
-    good_frames = 0
-    recoveries = 0
+    controller = Controller(reference, 0.0, settings)  # Times are seconds since start.
     try:
         while clock() < deadline:
             if finish_requested is not None and finish_requested():
                 return "finish_marker"
             capture_start = clock()
             frame = cv2.cvtColor(camera.capture_array(), cv2.COLOR_BGRA2BGR)
-            last_frame = frame
-            last_frame_id = count
+            if recorder is not None:
+                recorder.add(count, frame)
             heading = fresh_heading(imu, clock)
             delta = signed_delta(heading, zero, imu.SIGN)
-            detection = detect_line(frame)
-            summary = summarize(detection, reference, delta)
+            detection, summary = controller.observe(frame, delta, capture_start - start)
             now = clock()
-            row = {"elapsed_s": round(now - start, 4), "frame_id": count,
-                   "processing_s": round(now - capture_start, 4), **summary,
-                   "speed": 0, "raw_turn": 0, "physical_turn": 0,
-                   "target_heading_deg": None, "state": "checking"}
+            row = new_row(now - start, count, now - capture_start, summary)
             records.append(row)
-            if now - start - last_saved >= frame_interval:
-                frames.append((count, frame.copy()))
-                last_saved = now - start
             if now >= deadline:
                 row["state"] = "duration_complete"
                 break
@@ -143,73 +251,34 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
                 raise RuntimeError("Control loop delayed; refusing to resume motion")
             if now - capture_start > settings.max_sample_age:
                 raise RuntimeError("Camera/processing data stale")
-            if abs(delta) >= settings.abort_heading:
-                raise RuntimeError("Heading exceeded bounded test limit")
-            trustworthy = (detection["status"] == "tracked"
-                           and detection["confidence"] >= settings.min_confidence)
-            if not trustworthy or lost_since is not None:
-                # A blur frame requests a stop immediately. Reacquisition uses
-                # fresh camera samples while stopped, not blind forward motion.
-                if saber is not None:
-                    saber.stop()
-                last_command = clock()
-                if lost_since is None:
-                    recoveries += 1
-                    if recoveries > settings.max_reacquisitions:
-                        raise RuntimeError("Repeated tracking interruptions; run stopped")
-                    lost_since = now
-                    good_frames = 0
-                if trustworthy:
-                    good_frames += 1
-                else:
-                    good_frames = 0
-                row["state"] = "reacquiring"
-                if now - lost_since >= settings.reacquire_seconds:
-                    raise RuntimeError("Tracking did not recover while stopped")
-                if good_frames < settings.reacquire_frames:
-                    # Preserve interruption frames even between routine snapshots.
-                    if not frames or frames[-1][0] != count:
-                        frames.append((count, frame.copy()))
-                    count += 1
-                    sleep(max(0, min(0.04 - (clock() - capture_start), deadline - clock())))
-                    continue
-                lost_since = None
-                good_frames = 0
-            try:
-                command = choose_command(summary["near_error_normalized"], delta,
-                                         detection["confidence"], detection["status"],
-                                         now - capture_start, settings)
-            except RuntimeError as exc:
-                row["state"] = str(exc)
-                raise
+            command = controller.decide(detection, summary, delta, now - start, row)
             if saber is not None:
-                saber.drive(command["speed"], command["raw_turn"])
-            row.update(command, state="driving" if saber is not None else "diagnostic")
+                if command["speed"] == 0:
+                    saber.stop()
+                else:
+                    saber.drive(command["speed"], command["raw_turn"])
             last_command = clock()
             count += 1
             sleep(max(0, min(0.04 - (clock() - capture_start), deadline - clock())))
-        if lost_since is not None:
-            raise RuntimeError("Tracking not recovered before time limit")
         return "duration_complete"
     finally:
         if saber is not None:
             saber.stop()
-        if last_frame is not None and (not frames or frames[-1][0] != last_frame_id):
-            frames.append((last_frame_id, last_frame.copy()))
 
 
-def save_results(output, records, frames, outcome):
-    from track_vision import save_frame
+def save_results(output, records, recorder, outcome):
+    from run_metrics import score
     if records:
         with (output / "readings.csv").open("x", newline="") as log:
             writer = csv.DictWriter(log, fieldnames=list(records[0]))
             writer.writeheader()
             writer.writerows(records)
-    raw = output / "raw"
-    raw.mkdir(exist_ok=True)
-    for index, frame in frames:
-        save_frame(raw / f"frame_{index:05d}.png", frame)
+    if recorder is not None:
+        outcome["recording"] = recorder.save(output / "frames")
+    metrics = score(records, outcome["settings"]["min_confidence"])
+    (output / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
     (output / "outcome.json").write_text(json.dumps(outcome, indent=2) + "\n")
+    return metrics
 
 
 def finish_entered():
@@ -241,6 +310,10 @@ def main(argv=None):
     parser.add_argument("--camera", type=int)
     parser.add_argument("--exposure-us", type=bounded_int(0, 20000), default=5000,
                         help="short exposure in microseconds; 0 keeps auto exposure")
+    parser.add_argument("--record-every", type=bounded_int(0, 10), default=1,
+                        help="save every Nth camera frame as JPEG for replay; 0 disables")
+    parser.add_argument("--set", nargs="+", action="extend", default=[], metavar="KEY=VALUE",
+                        help=f"tuning override, e.g. --set position_gain=30 turn_rate=30; keys: {', '.join(TUNABLE)}")
     parser.add_argument("--output", type=Path, default=Path("centering_results"))
     args = parser.parse_args(argv)
     if args.duration is not None and args.duration > 10:
@@ -256,11 +329,14 @@ def main(argv=None):
         args.duration = args.duration or 3.0
     if args.camera is not None and args.camera < 0:
         parser.error("--camera must be nonnegative")
-    settings = Settings(speed=args.speed, max_turn=args.max_turn)
+    try:
+        settings = tuned(Settings(speed=args.speed, max_turn=args.max_turn), args.set)
+    except ValueError as exc:
+        parser.error(str(exc))
     camera = imu = saber = None
     started = False
     output = None
-    records, frames = [], []
+    records, recorder = [], None
     outcome = {"execute": args.execute, "duration_s": args.duration,
                "trial": args.trial, "requested_distance_ft": args.distance_ft,
                "nominal_time_estimate_s": nominal, "distance_measured": False,
@@ -277,7 +353,7 @@ def main(argv=None):
         import cv2
         from picamera2 import Picamera2
         from imu_controller import IMUDevice
-        from track_vision import detect_line, save_frame
+        from track_vision import detect_lane, save_frame
 
         infos = Picamera2.global_camera_info()
         for index, info in enumerate(infos):
@@ -313,7 +389,7 @@ def main(argv=None):
         output = args.output / datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
         output.mkdir(parents=True, exist_ok=False)
         frame = cv2.cvtColor(camera.capture_array(), cv2.COLOR_BGRA2BGR)
-        reference = detect_line(frame)
+        reference = detect_lane(frame)
         save_frame(output / "reference_raw.png", frame)
         if reference["status"] != "tracked" or reference["confidence"] < settings.min_confidence:
             raise RuntimeError("Centered reference not reliably tracked")
@@ -331,14 +407,17 @@ def main(argv=None):
         }
         print(instructions[args.trial])
         if args.trial != "straight":
-            print("Recovery is under test. Large rotation/line loss still stops the program.")
+            print("Recovery is under test. Brief lane loss coasts on IMU heading; longer loss slows,")
+            print(f"stops, and waits; {settings.lost_limit:g}s without the lane, or large rotation, ends the run.")
         answer = input("Type RUN to begin the bounded test (anything else cancels): ")
         if answer.strip() != "RUN":
             outcome["reason"] = "cancelled"
             return 2
-        reason = control_loop(camera, imu, saber, reference, zero, args.duration, settings, records, frames,
-                              finish_requested=finish_entered if nominal is not None else None,
-                              frame_interval=1.0 if nominal is not None else 0.25)
+        if args.record_every:
+            from run_recording import FrameRecorder
+            recorder = FrameRecorder(every=args.record_every)
+        reason = control_loop(camera, imu, saber, reference, zero, args.duration, settings, records, recorder,
+                              finish_requested=finish_entered if nominal is not None else None)
         outcome["reason"] = reason
         if nominal is not None and reason != "finish_marker":
             print("Fallback time limit reached. Five-foot completion is unconfirmed.")
@@ -366,8 +445,10 @@ def main(argv=None):
                 print(f"Cleanup warning: {exc}", file=sys.stderr)
         if output is not None:
             try:
-                save_results(output, records, frames, outcome)
+                from run_metrics import describe
+                metrics = save_results(output, records, recorder, outcome)
                 print(f"Saved results: {output}")
+                print("Run score:", describe(metrics))
             except Exception as exc:
                 print(f"Could not save all results: {exc}", file=sys.stderr)
         for signum, handler in handlers.items():

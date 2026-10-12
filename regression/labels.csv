@@ -1,0 +1,15 @@
+image,near_x,far_x,status,source,note
+centering_results/run_20261011_184441_221716/raw/frame_00010.png,0.6703,0.6203,confirmed,dash detector fit,powered course failure frame (blur)
+centering_results/run_20261011_183304_621915/raw/frame_00015.png,0.6441,0.5995,confirmed,dash detector fit,first powered failure frame (blur)
+centering_results/run_20261011_183051_983741/raw/frame_00060.png,0.6443,0.5992,confirmed,dash detector fit,yellow-green carpet patch near image center
+track_calibration/session_20261005_172428_111633/002_left_offset_straight.jpg,0.7529,0.6718,confirmed,dash detector fit,left offset
+track_calibration/session_20261005_172428_111633/003_right_offset_straight.jpg,0.5741,0.5584,confirmed,dash detector fit,right offset
+track_calibration/session_20261005_172428_111633/005_centered_rotated_right.jpg,0.2302,0.2187,confirmed,dash detector fit,rotated; lane cut by image border
+vision_results/run_20261005_174624_462341/raw/frame_00006.png,0.8024,0.7147,confirmed,"lane fit, visually checked",hand-moved motion blur
+vision_results/run_20261005_174624_462341/raw/frame_00022.png,0.7106,0.6525,confirmed,"lane fit, visually checked",heavy rotation blur
+vision_results/run_20261005_174624_462341/raw/frame_00024.png,0.1906,0.1704,confirmed,dash detector fit,rotated; lane cut by image border
+vision_results/run_20261005_174624_462341/raw/frame_00027.png,0.5957,0.5441,confirmed,"lane fit, visually checked",hand-moved motion blur
+vision_results/run_20261005_174624_462341/raw/frame_00018.png,,,confirmed,visually checked,"lane sliver at image edge, no dashes"
+vision_results/run_20261005_174624_462341/raw/frame_00020.png,,,confirmed,visually checked,"lane sliver at image edge, no dashes"
+vision_results/run_20261005_174624_462341/raw/frame_00021.png,,,confirmed,visually checked,"lane sliver at image edge, no dashes"
+track_calibration/session_20261005_172428_111633/004_centered_rotated_left.jpg,,,confirmed,visually checked,"lane sliver at image edge, no dashes"

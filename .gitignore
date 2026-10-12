@@ -15,3 +15,6 @@ venv/
 # OS / editor files
 .DS_Store
 .vscode/
+
+# Regenerable replay output (replay_run.py)
+replay_results/
