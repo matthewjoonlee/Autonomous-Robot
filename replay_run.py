@@ -173,8 +173,11 @@ def report(run, overrides, video=False, mine=False, limit=24):
 
     print(f"\n{run.relative_to(ROOT) if run.is_relative_to(ROOT) else run}"
           f"  trial={outcome.get('trial')}  ended: {outcome.get('reason')}")
-    if coverage < 0.95:
+    every = (outcome.get("recording") or {}).get("record_every", 1)
+    if coverage * every < 0.95:
         print(f"  Only {coverage:.0%} of frames were recorded; lost-lane timing in replay is approximate.")
+    elif every > 1:
+        print(f"  Every {every}th frame was recorded; replay steps between those frames.")
     changed = {key: getattr(settings, key) for key in TUNABLE + ("max_turn", "abort_heading")
                if outcome.get("settings", {}).get(key) not in (None, getattr(settings, key))}
     if changed:

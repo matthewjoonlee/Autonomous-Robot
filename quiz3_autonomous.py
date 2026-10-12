@@ -473,7 +473,7 @@ def run_leg(number, camera, imu, saber, settings, calibration, output_root, leg_
 
 
 def run_session(camera, imu, saber, settings, calibration, output_root, leg_ft=15.0, speed_cm_s=14.0,
-                record_every=1, execute=False, max_legs=None, commands=None,
+                record_every=3, execute=False, max_legs=None, commands=None,
                 clock=time.monotonic, sleep=time.sleep):
     """One program for every test: wait to be placed, drive a leg, stop, repeat.
 
@@ -509,8 +509,9 @@ def main(argv=None):
     parser.add_argument("--camera", type=int)
     parser.add_argument("--exposure-us", type=bounded_int(0, 20000), default=5000,
                         help="short exposure in microseconds; 0 keeps auto exposure")
-    parser.add_argument("--record-every", type=bounded_int(0, 10), default=1,
-                        help="save every Nth camera frame as JPEG for replay; 0 disables")
+    parser.add_argument("--record-every", type=bounded_int(0, 10), default=3,
+                        help="save every Nth camera frame as JPEG for replay (default 3, ~10 MB per "
+                             "15 ft leg); 1 keeps all; 0 disables")
     parser.add_argument("--set", nargs="+", action="extend", default=[], metavar="KEY=VALUE",
                         help=f"tuning override, e.g. --set position_gain=30 turn_rate=30; keys: {', '.join(TUNABLE)}")
     parser.add_argument("--output", type=Path, default=Path("centering_results"))

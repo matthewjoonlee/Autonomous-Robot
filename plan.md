@@ -381,7 +381,7 @@ The exam runs all tests in one program: the robot is moved between tests and mus
 2. Leg: hold still ~0.5 s to measure heading and offset from the image (sets the IMU zero), then drive until an estimated 15 ft (`--leg-ft`, at most 20; time fallback 2x nominal, capped at 90 s). Enter ends the leg.
 3. Lane not found for 3 s, rotation past 45 degrees, or no lane at start ends only that leg: motors stop, the leg is saved, and the robot waits to be placed again. Hardware/IMU/timing faults still end the program.
 
-Each leg is saved as its own `run_*` folder (trial `leg N`), so replay, mining, and the scorecard work unchanged. No prompts appear between legs. A 15 ft leg is about 33 s and roughly 30 MB of recorded frames. Session tests cover first placement, no restart until moved, pick-up and slide restarts, Enter/q, two legs from different starts in one session, and a lane fault that ends one leg but not the session.
+Each leg is saved as its own `run_*` folder (trial `leg N`), so replay, mining, and the scorecard work unchanged. To keep pushes small, every 3rd frame is recorded by default (`--record-every 3`, about 10 MB per 15 ft leg; `--record-every 1` keeps all). Replay then steps the controller only on recorded frames, so decisions approximate the live ones more loosely than with every frame. No prompts appear between legs. A 15 ft leg is about 33 s and roughly 30 MB of recorded frames. Session tests cover first placement, no restart until moved, pick-up and slide restarts, Enter/q, two legs from different starts in one session, and a lane fault that ends one leg but not the session.
 
 Control behavior:
 
