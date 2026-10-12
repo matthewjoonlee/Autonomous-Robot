@@ -95,7 +95,7 @@ class CourseTests(unittest.TestCase):
     def test_lane_fault_ends_leg_but_not_session(self):
         clock = centering_helpers.Clock()
         # Leg 1 loses the lane for good (searching ends it); then the robot is placed again.
-        frames = [GOOD] * 40 + [GOOD] * 10 + [GOOD] * 3 + [BLACK] * 90 + [GOOD] * 45 + [GOOD] * 10 + [GOOD] * 25
+        frames = [GOOD] * 40 + [GOOD] * 10 + [GOOD] * 3 + [BLACK] * 120 + [GOOD] * 45 + [GOOD] * 10 + [GOOD] * 25
         with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
             # Searching keeps driving, so the leg must be long enough for the 3 s limit to end it.
             legs = run_session(Camera(frames, clock), centering_helpers.IMU(itertools.repeat(0.0)), None,

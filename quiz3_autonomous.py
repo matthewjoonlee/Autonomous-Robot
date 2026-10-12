@@ -39,12 +39,23 @@ class Settings:
     turn_deadzone: float = 4.0   # Turn commands below ~5 barely rotate the robot (course-run data).
     turn_rate: float = 40.0      # Max change in physical turn units per second.
     turn_slowdown: float = 0.0   # Speed fraction shed at full turn; 0 until lower speeds are validated.
-    lost_limit: float = 3.0      # Seconds searching for an unseen lane before stopping (~42 cm).
+    lost_limit: float = 4.0      # Seconds without the lane before stopping (~55 cm); turning back takes ~2 s.
+    # Lane unseen this long (e.g. nudged out of view): turn back to the original track
+    # heading instead of aiming at where the lane was, so the camera looks along the track.
+    return_after: float = 0.3
+    # A detection whose lateral jumps more than this (normalized, ~80 px) from a recent
+    # estimate is ignored unless `confirm_frames` consecutive detections agree.
+    lateral_jump: float = 0.125
+    confirm_frames: int = 3
+    # Turned further than this from the track direction (e.g. a hard nudge), the rotation
+    # correction (measured to ~13 deg) is unreliable: ignore lane readings and turn back to
+    # the original heading first. Edge-start approaches stay within max_target_heading (12).
+    reliable_heading: float = 15.0
     prior_seconds: float = 0.3   # Search near the last lane fit only while it is this recent.
     max_sample_age: float = 0.15
 
 
-TUNABLE = ("position_gain", "heading_gain", "max_target_heading", "min_confidence", "smoothing",
+TUNABLE = ("position_gain", "heading_gain", "max_target_heading", "min_confidence", "smoothing", "return_after",
            "rotation_error_per_deg", "heading_correction", "turn_deadzone", "turn_rate", "turn_slowdown",
            "prior_seconds")
 
@@ -107,6 +118,8 @@ def clamp(value, limit):
 
 
 def choose_command(lateral, heading, lost_for, previous_turn, dt, settings=Settings()):
+    # While the lane has been unseen past `return_after`, or the robot is turned past
+    # `reliable_heading`, aim along the track (heading 0): look back the original way.
     """Positive lateral error requests physical right, hence negative raw turn.
 
     `lateral` is the filtered near-row image error with the IMU-measured
@@ -125,6 +138,8 @@ def choose_command(lateral, heading, lost_for, previous_turn, dt, settings=Setti
     if lost_for >= settings.lost_limit:
         raise RuntimeError("Lane not found; run stopped")
     target = clamp(settings.position_gain * lateral, settings.max_target_heading)
+    if lost_for > settings.return_after or abs(heading) > settings.reliable_heading:
+        target = 0.0
     desired = clamp(settings.heading_gain * (target - heading), settings.max_turn)
     turn = previous_turn + clamp(desired - previous_turn, settings.turn_rate * dt)
     command = 0.0
@@ -153,6 +168,7 @@ class LaneTracker:
         # moved (e.g. to a half-off-road start) after the reference was captured.
         self.fit = None
         self.lateral = 0.0
+        self.pending = None  # Consecutive lateral measurements awaiting confirmation of a jump.
         self.seen = now
         self.seen_heading = 0.0
 
@@ -168,12 +184,25 @@ class LaneTracker:
 
     def update(self, detection, error, heading, now):
         settings = self.settings
-        if self.trusted(detection, error):
-            measured = error + settings.rotation_error_per_deg * heading
+        if not self.trusted(detection, error):
+            return False
+        measured = error + settings.rotation_error_per_deg * heading
+        if self.fit is None:
+            self.lateral = measured  # First sighting (e.g. an edge start): take it as is.
+        elif abs(measured - self.lateral) > settings.lateral_jump:
+            # Implausible jump (often a false fit after a big nudge): require agreement.
+            if self.pending is not None and abs(measured - self.pending[-1]) < settings.lateral_jump / 2:
+                self.pending.append(measured)
+            else:
+                self.pending = [measured]
+            if len(self.pending) < settings.confirm_frames:
+                return False
+            self.lateral = measured  # Confirmed: the robot really moved (e.g. a push).
+        else:
             self.lateral += settings.smoothing * (measured - self.lateral)
-            self.fit, self.seen, self.seen_heading = detection["fit"], now, heading
-            return True
-        return False
+        self.pending = None
+        self.fit, self.seen, self.seen_heading = detection["fit"], now, heading
+        return True
 
 
 class Controller:
@@ -203,14 +232,18 @@ class Controller:
         """Fill `row` with the decision; faults raise after naming the state."""
         tracker, settings = self.tracker, self.settings
         error = summary["near_error_normalized"]
-        if self.calibration is not None and settings.heading_correction and tracker.trusted(detection, error):
+        if abs(imu_heading + self.heading_bias) > settings.reliable_heading:
+            seen = False  # Too far turned to trust the lane reading; turn back first.
+        else:
+            seen = tracker.update(detection, error, imu_heading + self.heading_bias, now)
+        if self.calibration is not None and settings.heading_correction and seen:
+            # Only consistent detections correct the heading; false fits after a nudge must not.
             from lane_center import image_yaw
             yaw = image_yaw(detection["fit"], self.calibration, settings.rotation_error_per_deg)
             innovation = clamp(yaw - (imu_heading + self.heading_bias), 5.0)  # Limit one bad fit.
             self.heading_bias += settings.heading_correction * innovation
             row["image_yaw_deg"] = round(yaw, 2)
         heading = imu_heading + self.heading_bias
-        seen = tracker.update(detection, error, heading, now)
         lost_for = now - tracker.seen
         row.update(heading_deg=round(heading, 2), lateral_error=round(tracker.lateral, 5),
                    lost_s=round(lost_for, 3))

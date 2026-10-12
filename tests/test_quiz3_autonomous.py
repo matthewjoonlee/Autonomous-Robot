@@ -113,7 +113,37 @@ class CenteringTests(unittest.TestCase):
         self.assertEqual(result["speed"], 25)
         self.assertEqual(result["physical_turn"], 20)
         with self.assertRaisesRegex(RuntimeError, "Lane not found"):
-            command(lost_for=3.0)
+            command(lost_for=4.0)
+
+    def test_lost_lane_turns_back_to_original_heading(self):
+        # Lane last seen far to the side, robot turned 20 deg: aim along the track, not at the lane.
+        early = command(0.2, heading=-5, lost_for=0.1)
+        later = command(0.2, heading=-5, lost_for=0.5)
+        self.assertEqual(early["target_heading_deg"], 12)   # Brief dropout: keep the approach.
+        self.assertEqual(later["target_heading_deg"], 0)    # Lost: look back the original way.
+        self.assertEqual(command(-0.3, heading=20, lost_for=1.0)["physical_turn"], -20)
+
+    def test_far_turned_robot_ignores_lane_and_turns_back(self):
+        result = command(0.3, heading=18)  # Lane reading says "far left", but turned 18 deg.
+        self.assertEqual(result["target_heading_deg"], 0)
+        self.assertLess(result["physical_turn"], 0)
+        self.assertEqual(command(0.3, heading=10)["target_heading_deg"], 12)  # Normal approach.
+
+    def test_implausible_lateral_jump_needs_confirmation(self):
+        settings = Settings()
+        tracker = LaneTracker({"fit": (0.1, 0.6)}, 0.0, settings)
+        tracked = {"status": "tracked", "confidence": 0.9, "fit": (0.1, 0.65)}
+        self.assertTrue(tracker.update(tracked, 0.0, 0, 0.04))
+        self.assertFalse(tracker.update(tracked, 0.45, 0, 0.08))  # ~290 px jump: ignored...
+        self.assertFalse(tracker.update(tracked, 0.46, 0, 0.12))
+        self.assertAlmostEqual(tracker.lateral, 0.0)
+        self.assertTrue(tracker.update(tracked, 0.45, 0, 0.16))   # ...unless 3 frames agree.
+        self.assertAlmostEqual(tracker.lateral, 0.45)
+        tracker = LaneTracker({"fit": (0.1, 0.6)}, 0.0, settings)
+        tracker.update(tracked, 0.0, 0, 0.04)
+        self.assertFalse(tracker.update(tracked, 0.45, 0, 0.08))
+        self.assertTrue(tracker.update(tracked, 0.01, 0, 0.12))   # A one-off outlier is forgotten.
+        self.assertIsNone(tracker.pending)
 
     def test_nudge_sized_rotation_does_not_abort(self):
         self.assertEqual(command(heading=-20)["physical_turn"], 20)
@@ -264,11 +294,11 @@ class CenteringTests(unittest.TestCase):
         good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
         bad = np.zeros_like(good)
         camera, imu, motors, reference, clock, rows, frames = self.setup_loop(
-            [good] + [bad] * 90, [0] * 91)
+            [good] + [bad] * 120, [0] * 121)
         with self.assertRaisesRegex(RuntimeError, "Lane not found"):
             control_loop(camera, imu, motors, reference, 0, 5, Settings(), rows, frames, clock, clock.sleep)
         self.assertTrue(all(speed == 25 for _, speed, _ in motors.commands))
-        self.assertTrue(all(t < 3.0 for t, _, _ in motors.commands))
+        self.assertTrue(all(t < 4.0 for t, _, _ in motors.commands))
         self.assertTrue(motors.stops)
         self.assertEqual(rows[-1]["state"], "Lane not found; run stopped")
 

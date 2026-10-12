@@ -429,6 +429,18 @@ Legs `run_20261011_230521_064421` (center), `230602_508233`, `230634_327418`, `2
 
 By request, `lane_app.py` runs have no distance stop by default: a run ends on STOP, 3 s without the lane (for example past the end of the mats; `--keep-searching` disables this), 45 degrees of rotation, or a 10-minute safety time limit. `--leg-ft` (up to 100 ft) still sets a limit; `quiz3_autonomous.py` keeps its 15 ft default with the cap raised to 100 ft.
 
+### Nudged out of view: turn back to the original heading
+
+Run `run_20261012_153318_001794`: a hard nudge spun the robot to about +24 degrees and the lane left the view. Then (1) a false detection made the lateral estimate jump from 149 to 284 px in 0.2 s; (2) those fits pulled the image-heading correction to about 11 degrees while the IMU read 15-18; (3) believing the lane was far to the side, the controller held the full 12-degree approach and drove off at about 15-18 degrees.
+
+Changes, by request ("look back to the original heading"):
+- After 0.3 s without the lane (`return_after`), the target heading is the original track direction (0), not an approach toward where the lane was; brief dropouts keep the approach.
+- Turned more than 15 degrees from the track (`reliable_heading`; the rotation correction was measured only to about 13 degrees), lane readings are ignored and the robot turns back first. Edge-start approaches stay within 12 degrees.
+- A lateral reading jumping more than about 80 px from a recent estimate needs 3 agreeing frames; a first sighting (edge start) is taken directly. Only accepted detections correct the heading.
+- `lost_limit` 3 to 4 s, since turning back from about 24 degrees takes about 2 s at full turn.
+
+Replay of that run now commands a full turn back toward the track heading after the nudge instead of the 12-degree approach away. Edge-start replays are unchanged apart from the every-3rd-frame recording effect on heading correction.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
