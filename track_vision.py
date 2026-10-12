@@ -157,9 +157,10 @@ def detect_lane(frame, prior=None, gate=0.10, tolerance=0.02):
     # pushed a third of the (blue-black) lane above saturation 120, so very dark
     # blue-hued pixels also count.
     hue, saturation, value = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    # Mats: hue 42-57, brightness 112-163 across rooms. The lane is far darker (55-76)
-    # and can look greenish in some lighting, so only brighter green pixels are mat.
-    green = (hue >= 30) & (hue < 75) & (saturation > 40) & (value >= 90)
+    # Mats: hue 39-57 in every room, but brightness 64-163 (dark under bright windows).
+    # The lane: hue 84-106, though in one room it dipped to 69-80 at brightness 55-76.
+    # So hue 30-60 is mat at any brightness; 60-75 only when bright enough to be mat.
+    green = (hue >= 30) & (saturation > 40) & ((hue < 60) | ((hue < 75) & (value >= 90)))
     lane = ((value < 125) & (saturation < 135) & ~green) | yellow
     kernel = np.ones((1, max(3, round(width / 40))), dtype=np.uint8)
     lane = cv2.morphologyEx(lane.astype(np.uint8), cv2.MORPH_CLOSE, kernel)

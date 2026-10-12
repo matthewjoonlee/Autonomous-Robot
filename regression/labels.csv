@@ -75,3 +75,9 @@ centering_results/run_20261011_223932_140284/frames/frame_00084.jpg,0.9612,0.875
 centering_results/run_20261011_223959_429264/frames/frame_00000.jpg,0.8177,0.6777,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"
 centering_results/run_20261011_223959_429264/frames/frame_00021.jpg,0.4231,0.3350,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"
 centering_results/run_20261011_223959_429264/frames/frame_00042.jpg,0.3852,0.3137,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"
+centering_results/run_20261012_154231_089170/frames/frame_00021.jpg,0.7040,0.7337,confirmed,"lane fit, visually checked",sunny lobby: bright windows darken the green mats (brightness ~68)
+centering_results/run_20261012_154231_089170/frames/frame_00036.jpg,0.7448,0.7620,confirmed,"lane fit, visually checked",sunny lobby: bright windows darken the green mats (brightness ~68)
+centering_results/run_20261012_154231_089170/frames/frame_00048.jpg,0.6255,0.6502,confirmed,"lane fit, visually checked",sunny lobby: bright windows darken the green mats (brightness ~68)
+centering_results/run_20261012_154231_089170/frames/frame_00096.jpg,0.5808,0.5968,confirmed,"lane fit, visually checked",sunny lobby: bright windows darken the green mats (brightness ~68)
+centering_results/run_20261012_154408_286562/frames/frame_00024.jpg,0.8100,0.8067,confirmed,"lane fit, visually checked",sunny lobby: bright windows darken the green mats (brightness ~68)
+centering_results/run_20261012_154408_286562/frames/frame_00057.jpg,0.8760,0.8435,confirmed,"lane fit, visually checked",sunny lobby: bright windows darken the green mats (brightness ~68)

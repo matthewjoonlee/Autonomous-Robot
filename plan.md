@@ -441,6 +441,10 @@ Changes, by request ("look back to the original heading"):
 
 Replay of that run now commands a full turn back toward the track heading after the nudge instead of the 12-degree approach away. Edge-start replays are unchanged apart from the every-3rd-frame recording effect on heading correction.
 
+### Sunny lobby: dark green mats (October 12, 2026)
+
+Runs `run_20261012_1541*`-`1548*` in a bright lobby (edge starts both sides: centered at 2.9-5.2 ft). Lane losses were the detector, not the new jump/turn-back rules (2 frames rejected in total). Bright windows set the exposure so the green mats came out dark (brightness ~68, hue 39, saturation ~109) and passed the dark-lane test; the lane was hue 103, saturation ~42, brightness ~43. Mat exclusion is now by hue: 30-60 at any brightness, 60-75 only at brightness 90+ (the first room's lane dipped to hue 69-80 at 55-76). On-mat frames in this room: 84% to 100% usable (median confidence 0.74 to 0.92); every other room unchanged. Later losses were the mats ending (~10-11 ft from these starts). Six lobby frames added to the regression set.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
