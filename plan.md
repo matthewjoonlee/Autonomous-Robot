@@ -394,6 +394,14 @@ Legs `run_20261011_222608_014418`, `222712_568548`, `222851_395272` (each starte
 - "A little off": the image shows a slight lens bend (near-half lane slope 0.03-0.15 below the far half), and in one stretch the image heading read about 4 degrees while the lateral estimate did not change, i.e. a few-degree heading bias worth roughly 2-3 cm. A quadratic fit did not improve physical consistency, so the straight-line fit stays. Plain straight legs without nudges would isolate this.
 - One frame previously labeled as a no-lane sliver (nudge run, frame 222) actually shows the dashes; relabeled.
 
+### Dim-room failure and lane color fix (October 11, 2026)
+
+Legs `run_20261011_223932_140284` and `223959_429264` in another room performed badly: confidence 0.3-0.6 from the first frame, lane often lost, and a wrong fit swung the robot 12 degrees away. It was not the consensus detector (on these frames older detector versions usable 5% and 14%, consensus 25%). The lane mask was: in this room the green mats are dim (brightness 119-130) and washed out, passing the "dark, unsaturated" test, so lane and mats merged; the lane itself is more saturated (about 115) than elsewhere.
+
+Measured across the four rooms: mats hue 42-57 at brightness 112-163; lane brightness 55-76, hue 84-106 (greenish in the first room). The mask now excludes green-hued pixels only when bright enough to be mat (hue 30-75, saturation over 40, brightness 90+), and allows lane saturation up to 135. A dark-blue rule was tried and dropped: the blue robot parked at the track end then read as lane and suppressed the end-of-lane stop.
+
+Usable frames: new room 25% to 93% (median confidence 0.82); previous session 77% to 92%; all older footage stays at 100% (confidence 0.91). Dash-fit agreement max 2.5 px. Replay: the two bad legs track 89% and 100%; end-of-lane triggers at all three track ends and nowhere else. Eight new-room frames added to the regression set (76 labels).
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.

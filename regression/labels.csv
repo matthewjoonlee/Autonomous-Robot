@@ -67,3 +67,11 @@ centering_results/run_20261011_214721_248543/reference_raw.png,0.6395,0.5936,con
 centering_results/run_20261011_214821_207942/reference_raw.png,0.6570,0.6078,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector
 centering_results/run_20261011_214940_946079/reference_raw.png,0.6531,0.6066,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector
 centering_results/run_20261011_215102_496234/reference_raw.png,0.6379,0.5918,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector
+centering_results/run_20261011_223932_140284/frames/frame_00000.jpg,0.6524,0.6043,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"
+centering_results/run_20261011_223932_140284/frames/frame_00021.jpg,0.6053,0.5627,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"
+centering_results/run_20261011_223932_140284/frames/frame_00042.jpg,0.6134,0.5696,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"
+centering_results/run_20261011_223932_140284/frames/frame_00063.jpg,0.6165,0.5716,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"
+centering_results/run_20261011_223932_140284/frames/frame_00084.jpg,0.9612,0.8759,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"
+centering_results/run_20261011_223959_429264/frames/frame_00000.jpg,0.8177,0.6777,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"
+centering_results/run_20261011_223959_429264/frames/frame_00021.jpg,0.4231,0.3350,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"
+centering_results/run_20261011_223959_429264/frames/frame_00042.jpg,0.3852,0.3137,confirmed,"lane fit, visually checked","dim room: green mats under the old dark threshold, lane saturation ~115"

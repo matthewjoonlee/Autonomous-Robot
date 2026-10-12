@@ -152,7 +152,15 @@ def detect_lane(frame, prior=None, gate=0.10, tolerance=0.02):
     height, width = frame.shape[:2]
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     yellow = cv2.inRange(hsv, np.array([18, 85, 130]), np.array([38, 255, 255])) > 0
-    lane = ((hsv[..., 2] < 125) & (hsv[..., 1] < 120)) | yellow
+    # Dark, unsaturated pixels are lane, except clearly green ones: in dim rooms the
+    # green mats fall under the brightness/saturation limits too. Bluish lighting
+    # pushed a third of the (blue-black) lane above saturation 120, so very dark
+    # blue-hued pixels also count.
+    hue, saturation, value = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    # Mats: hue 42-57, brightness 112-163 across rooms. The lane is far darker (55-76)
+    # and can look greenish in some lighting, so only brighter green pixels are mat.
+    green = (hue >= 30) & (hue < 75) & (saturation > 40) & (value >= 90)
+    lane = ((value < 125) & (saturation < 135) & ~green) | yellow
     kernel = np.ones((1, max(3, round(width / 40))), dtype=np.uint8)
     lane = cv2.morphologyEx(lane.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
     rows = range(int(height * ROI_BOTTOM) - 1, int(height * ROI_TOP), -4)
