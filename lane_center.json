@@ -1,0 +1,18 @@
+{
+  "offset_far_ratio": 0.6,
+  "rotation_far_ratio": 0.91,
+  "notes": "offset_far_ratio: far-row/near-row shift for a sideways offset (captures 002/003: 0.60, 0.59). rotation_far_ratio: same for rotation (capture 005, +13.1 deg). near_x/far_x: median lane position at NEAR_Y/FAR_Y over operator-centered, straight reference images.",
+  "width": 640,
+  "near_x": 0.639,
+  "far_x": 0.5927,
+  "center_images": [
+    "centering_results/run_20261011_212015_704644/reference_raw.png",
+    "centering_results/run_20261011_212215_684522/reference_raw.png",
+    "centering_results/run_20261011_212513_828268/reference_raw.png",
+    "centering_results/run_20261011_212713_385597/reference_raw.png",
+    "centering_results/run_20261011_214721_248543/reference_raw.png",
+    "centering_results/run_20261011_214821_207942/reference_raw.png",
+    "centering_results/run_20261011_214940_946079/reference_raw.png",
+    "centering_results/run_20261011_215102_496234/reference_raw.png"
+  ]
+}

@@ -54,11 +54,17 @@ def replay(run, overrides=()):
     recorded = outcome.get("settings", {})
     # Current code's settings; only the recorded speed is kept, since it matches the recorded motion.
     settings = tuned(Settings(speed=recorded.get("speed", 25)), overrides)
-    reference_frame = read_image(run / "reference_raw.png")
-    reference = detect_lane(reference_frame)
-    if reference["fit"] is None:
-        raise RuntimeError(f"{run.name}: reference frame has no lane")
-    reference["width"] = reference_frame.shape[1]
+    if (run / "reference_raw.png").exists():
+        # Older runs captured a centered reference; re-detect it with the current detector.
+        reference_frame = read_image(run / "reference_raw.png")
+        reference = detect_lane(reference_frame)
+        if reference["fit"] is None:
+            raise RuntimeError(f"{run.name}: reference frame has no lane")
+        reference["width"] = reference_frame.shape[1]
+    else:
+        # Newer runs use the calibrated center saved in reference.json.
+        saved = json.loads((run / "reference.json").read_text())
+        reference = {"fit": tuple(saved["fit"]), "width": saved["width"]}
     controller = Controller(reference, 0.0, settings)
     replayed, detections = [], []
     for recorded_row in rows:
@@ -243,8 +249,8 @@ def main(argv=None):
         parser.error("no run folders with readings.csv")
     failures = 0
     for run in runs:
-        if not (run / "reference_raw.png").exists():
-            print(f"\n{run.name}: no reference_raw.png; skipped")
+        if not (run / "reference_raw.png").exists() and not (run / "reference.json").exists():
+            print(f"\n{run.name}: no reference; skipped")
             continue
         try:
             report(run, args.set, args.video, args.mine)

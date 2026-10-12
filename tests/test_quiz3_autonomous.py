@@ -8,7 +8,8 @@ import cv2
 import numpy as np
 
 from quiz3_autonomous import (LaneTracker, Settings, choose_command, configure_motion_exposure,
-                              control_loop)
+                              control_loop, measure_start)
+from test_imu import signed_delta
 from track_vision import DEFAULT_SESSION, detect_lane, read_image
 
 
@@ -206,6 +207,31 @@ class CenteringTests(unittest.TestCase):
         self.assertTrue(all(turn >= 0 for turn in turns) and max(turns) > 4)  # Right, toward the lane.
         self.assertEqual(max(row["target_heading_deg"] for row in rows[:5]), 12)
 
+    def test_start_up_sets_imu_zero_from_image_heading(self):
+        from lane_center import load
+        rotated = read_image(DEFAULT_SESSION / "005_centered_rotated_right.jpg")
+        for sign in (1, -1):
+            with self.subTest(sign=sign):
+                clock = Clock()
+                imu = IMU([350.0 + 0.0625 * (i % 2) for i in range(10)])
+                imu.SIGN = sign
+                zero, start = measure_start(Camera([rotated] * 10, clock), imu, load(), Settings(),
+                                            clock=clock, sleep=clock.sleep)
+                # Placed ~13 deg right of the track: relative heading must start there.
+                self.assertAlmostEqual(signed_delta(350.0, zero, sign), start["yaw_deg"], delta=0.1)
+                self.assertAlmostEqual(start["yaw_deg"], 13.1, delta=0.6)
+                self.assertLess(abs(start["lateral_px"]), 10)
+                self.assertEqual(start["lane_frames"], 10)
+
+    def test_start_up_refuses_without_lane(self):
+        from lane_center import load
+        good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
+        clock = Clock()
+        frames = [np.zeros_like(good)] * 7 + [good] * 3
+        with self.assertRaisesRegex(RuntimeError, "Lane not visible at start"):
+            measure_start(Camera(frames, clock), IMU([0.0] * 10), load(), Settings(),
+                          clock=clock, sleep=clock.sleep)
+
     def test_persistent_loss_searches_then_faults(self):
         good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
         bad = np.zeros_like(good)
@@ -308,6 +334,81 @@ class CenteringTests(unittest.TestCase):
                     self.assertFalse(motors.commands)
                     self.assertFalse(motors.stops)
                     self.assertTrue(all(row["state"] == "driving" for row in rows))
+
+
+class MainFlowTests(unittest.TestCase):
+    def test_motor_free_run_needs_no_reference_capture(self):
+        import itertools
+        import json
+        import sys
+        import tempfile
+        import types
+        from pathlib import Path
+        from quiz3_autonomous import main
+
+        frame = read_image(DEFAULT_SESSION / "002_left_offset_straight.jpg")
+
+        class FakeCamera:
+            @staticmethod
+            def global_camera_info():
+                return [{"Model": "imx219"}]
+
+            def __init__(self, index):
+                pass
+
+            def create_video_configuration(self, **kwargs):
+                return kwargs
+
+            def configure(self, config):
+                pass
+
+            def start(self):
+                pass
+
+            def capture_metadata(self):
+                return {}
+
+            def capture_array(self):
+                return cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+
+            def stop(self):
+                pass
+
+            def close(self):
+                pass
+
+        class FakeIMU:
+            SIGN = 1
+
+            def heading(self):
+                return 200.0
+
+            def close(self):
+                pass
+
+        camera_module = types.ModuleType("picamera2")
+        camera_module.Picamera2 = FakeCamera
+        imu_module = types.ModuleType("imu_controller")
+        imu_module.IMUDevice = FakeIMU
+        prompts = []
+        answers = itertools.chain(["RUN"], itertools.repeat(""))
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.dict(sys.modules, {"picamera2": camera_module, "imu_controller": imu_module}), \
+                    patch("builtins.input", side_effect=lambda prompt="": prompts.append(prompt) or next(answers)), \
+                    patch("builtins.print"), patch("quiz3_autonomous.time.sleep"):
+                result = main(["--trial", "left", "--duration", "0.3", "--exposure-us", "0",
+                               "--output", folder])
+            run = next(Path(folder).glob("run_*"))
+            saved = json.loads((run / "reference.json").read_text())
+            outcome = json.loads((run / "outcome.json").read_text())
+            names = {path.name for path in run.iterdir()}
+        self.assertEqual(result, 0)
+        self.assertEqual(len(prompts), 2)  # RUN and the operator note; no reference prompt.
+        self.assertNotIn("reference_raw.png", names)
+        self.assertTrue({"start_raw.png", "readings.csv", "metrics.json", "frames"} <= names)
+        self.assertEqual(outcome["reason"], "duration_complete")
+        self.assertGreater(outcome["start"]["lateral_px"], 30)  # Placed left of center.
+        self.assertAlmostEqual(saved["zero_heading_deg"], (200.0 - saved["yaw_deg"]) % 360, delta=0.01)
 
 
 if __name__ == "__main__":

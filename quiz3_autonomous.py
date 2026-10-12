@@ -9,6 +9,7 @@ import math
 from pathlib import Path
 import select
 import signal
+import statistics
 import sys
 import time
 
@@ -280,6 +281,41 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
             saber.stop()
 
 
+def measure_start(camera, imu, calibration, settings, samples=10, clock=time.monotonic, sleep=time.sleep):
+    """Stationary start-up: find the lane and the robot's heading from the image.
+
+    There is no centered reference capture. The calibrated center
+    (`lane_center.json`) gives the lane position, and the image gives the
+    heading relative to the track, which sets the IMU zero. Refuses to start
+    when the lane is not seen in most start-up frames.
+    """
+    import cv2
+    from lane_center import image_yaw
+    from track_vision import NEAR_Y, detect_lane
+
+    first = None
+    yaws, offsets, nears, frame = [], [], [], None
+    for _ in range(samples):
+        frame = cv2.cvtColor(camera.capture_array(), cv2.COLOR_BGRA2BGR)
+        heading = fresh_heading(imu, clock)
+        first = heading if first is None else first
+        detection = detect_lane(frame)
+        if detection["status"] == "tracked" and detection["confidence"] >= settings.min_confidence:
+            yaws.append(image_yaw(detection["fit"], calibration, settings.rotation_error_per_deg))
+            offsets.append(signed_delta(heading, first, 1))
+            nears.append(detection["fit"][0] * NEAR_Y + detection["fit"][1])
+        sleep(0.04)
+    if len(yaws) < max(3, samples // 2):
+        raise RuntimeError("Lane not visible at start; place the robot where the camera sees the lane")
+    yaw = statistics.median(yaws)
+    heading = (first + statistics.median(offsets)) % 360.0
+    zero = (heading - imu.SIGN * yaw) % 360.0  # So the relative heading starts at `yaw`.
+    near_error = statistics.median(nears) - calibration["near_x"]
+    lateral_px = (near_error + settings.rotation_error_per_deg * yaw) * calibration["width"]
+    return zero, {"frame": frame, "yaw_deg": round(yaw, 2), "yaw_spread_deg": round(statistics.pstdev(yaws), 2),
+                  "lateral_px": round(lateral_px, 1), "lane_frames": len(yaws), "frames": samples}
+
+
 def save_results(output, records, recorder, outcome):
     from run_metrics import score
     if records:
@@ -369,7 +405,8 @@ def main(argv=None):
         import cv2
         from picamera2 import Picamera2
         from imu_controller import IMUDevice
-        from track_vision import detect_lane, save_frame
+        from lane_center import load as load_center, reference as center_reference
+        from track_vision import save_frame
 
         infos = Picamera2.global_camera_info()
         for index, info in enumerate(infos):
@@ -395,36 +432,22 @@ def main(argv=None):
             saber.set_auto_stop(200)
             saber.set_ramping(8)
         print(f"{'POWERED' if args.execute else 'MOTOR-FREE'} bounded run: {args.duration}s.")
-        print("Stop other control programs. Align centered/straight on continuous track.")
-        print("Keep a physical stop accessible; Ctrl+C stops.")
+        print("Stop other control programs. Keep a physical stop accessible; Ctrl+C stops.")
         if nominal is not None:
             print(f"Mark start/finish {args.distance_ft:g} ft apart. Nominal time ~{nominal:.1f}s.")
             print(f"Stops automatically at an estimated {args.distance_ft:g} ft (from speed, not measured);")
             print(f"press Enter at the finish to stop sooner. Time fallback {args.duration:.1f}s.")
         print("Remote disconnect is not a guaranteed stop; hardware timeout is not yet verified.")
-        input("Press Enter while centered and straight to capture the reference: ")
-        output = args.output / datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
-        output.mkdir(parents=True, exist_ok=False)
-        frame = cv2.cvtColor(camera.capture_array(), cv2.COLOR_BGRA2BGR)
-        reference = detect_lane(frame)
-        save_frame(output / "reference_raw.png", frame)
-        if reference["status"] != "tracked" or reference["confidence"] < settings.min_confidence:
-            raise RuntimeError("Centered reference not reliably tracked")
-        reference["width"] = frame.shape[1]
-        zero = fresh_heading(imu)
-        (output / "reference.json").write_text(json.dumps({
-            "fit": reference["fit"], "width": reference["width"], "zero_heading_deg": zero,
-        }, indent=2) + "\n")
-        print(f"Results: {output}")
+        calibration = load_center()
+        reference = center_reference(calibration)
         instructions = {
-            "straight": "Keep centered and straight; no pushes during this trial.",
-            "left": "Now slide LEFT to the edge, half the robot off the road, pointing straight; "
-                    "keep this centered reference.",
-            "right": "Now slide RIGHT to the edge, half the robot off the road, pointing straight; "
-                     "keep this centered reference.",
-            "nudge": "Start centered. After forward motion begins, apply one small sideways foot nudge.",
+            "straight": "Place the robot centered, pointing along the track. No pushes during this trial.",
+            "left": "Place the robot at the LEFT edge, half off the road, pointing along the track.",
+            "right": "Place the robot at the RIGHT edge, half off the road, pointing along the track.",
+            "nudge": "Place the robot centered. After it starts moving, give one sideways nudge.",
         }
         print(instructions[args.trial])
+        print("No reference capture: after RUN it holds still ~0.5 s to find the lane and its heading.")
         if args.trial != "straight":
             print("Recovery is under test. If the lane leaves view, the robot keeps driving and steers back")
             print(f"toward it on IMU heading; {settings.lost_limit:g}s without the lane or "
@@ -433,6 +456,18 @@ def main(argv=None):
         if answer.strip() != "RUN":
             outcome["reason"] = "cancelled"
             return 2
+        output = args.output / datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
+        output.mkdir(parents=True, exist_ok=False)
+        zero, start = measure_start(camera, imu, calibration, settings)
+        save_frame(output / "start_raw.png", start.pop("frame"))
+        outcome["start"] = start
+        (output / "reference.json").write_text(json.dumps({
+            "fit": reference["fit"], "width": reference["width"], "zero_heading_deg": zero,
+            "source": "lane_center.json calibration; IMU zero from start-up image heading", **start,
+        }, indent=2) + "\n")
+        print(f"Results: {output}")
+        print(f"Start: {start['yaw_deg']:+.1f} deg from the track direction, lane offset "
+              f"{start['lateral_px']:+.0f} px ({start['lane_frames']}/{start['frames']} frames saw the lane).")
         if args.record_every:
             from run_recording import FrameRecorder
             recorder = FrameRecorder(every=args.record_every)

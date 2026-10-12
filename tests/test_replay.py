@@ -114,6 +114,16 @@ class ReplayTests(unittest.TestCase):
             self.assertAlmostEqual(recorded["turn"], again["turn"], delta=0.5)
         self.assertGreater(max(r["turn"] for r in rows), 1)  # Left offset steered.
 
+    def test_replay_uses_saved_calibrated_reference_without_reference_image(self):
+        from track_vision import detect_lane
+        with tempfile.TemporaryDirectory() as folder:
+            run, rows = self.record_run(folder)
+            reference = detect_lane(read_image(run / "reference_raw.png"))
+            (run / "reference_raw.png").unlink()
+            (run / "reference.json").write_text(json.dumps({"fit": reference["fit"], "width": 640}))
+            _, _, replayed, _, _ = replay_run.replay(run)
+        self.assertEqual([r["state"] for r in replayed], [r["state"] for r in rows])
+
     def test_replay_report_and_mined_candidates(self):
         with tempfile.TemporaryDirectory() as folder:
             run, _ = self.record_run(folder)

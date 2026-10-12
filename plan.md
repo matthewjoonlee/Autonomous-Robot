@@ -354,6 +354,16 @@ Edge starts: the next left/right trials start half off the road at the edge, as 
 
 A loop test shifts the centered image 150 px and requires tracking from the first frame with a full 12-degree approach; it fails under the old reference prior. No half-off-road frames exist yet, so detection from the edge is unverified until this suite is recorded.
 
+### No centered reference: calibrated center and image heading
+
+The graded test does not allow capturing a centered reference first. The reference capture supplied two things: where the lane appears when centered, and the IMU zero for "pointing along the track". A one-degree zero error alone holds the robot about 1.5 cm off center.
+
+1. `lane_center.json` stores the centered-and-straight lane position (near row 0.639, far row 0.5927): the median over the eight operator-centered references from the two recorded suites, whose spread was about 7 px. The camera is fixed, so this is a robot property. `python lane_center.py IMAGE...` recomputes it from centered images if the mount moves.
+2. Heading from the image: a sideways offset moves the far row 0.60 as much as the near row (captures 002/003), while rotation moves it 0.91 as much (capture 005), so far minus 0.6 x near depends only on rotation. Across all eight recorded runs, image heading tracked the IMU with slope 0.83-1.28 and 0.2-0.7 degree per-frame noise, including the nudge's -2 to +12 degree swing. Per-run offsets of -0.1 to +1.0 degree were the by-eye straightness of each old reference. On the labeled captures it matches the IMU within 0.5 degree, and the rotated capture reads +1.3 px of lateral offset (rotation correctly not counted as offset).
+3. Start-up: after `RUN`, the robot holds still for ten frames (~0.5 s), requires the lane in at least half of them, and sets the IMU zero so the relative heading starts at the median image heading. It prints the start heading and lateral offset; without the lane it refuses to start. `start_raw.png`, the start measurements, and the calibrated reference are saved with the run; replay uses `reference.json` when there is no `reference_raw.png`.
+
+Trial prompts now describe placement only (centered, or half off at the left/right edge). The heading reference is fixed at start-up; if IMU drift becomes visible on longer runs, image heading (now well characterized) can slowly correct it. A motor-free end-to-end test runs `main` with fake camera/IMU and checks for no reference prompt and complete outputs.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.

@@ -13,7 +13,7 @@ TRIALS = ("straight", "left", "right", "nudge")
 def run_suite(execute, runner=run_centering, exposure_us=5000, extra=()):
     for index, trial in enumerate(TRIALS, 1):
         print(f"\nTrial {index}/4: {trial.upper()}")
-        print("Reposition at the marked start, centered and straight, before capturing the reference.")
+        print("Reposition at the marked start as this trial describes (centered, or half off at an edge).")
         arguments = ["--trial", trial, "--distance-ft", "5"]
         if execute:
             arguments.append("--execute")
