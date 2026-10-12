@@ -1,0 +1,45 @@
+{
+  "execute": true,
+  "duration_s": 27.70909090909091,
+  "trial": "straight",
+  "requested_distance_ft": 5.0,
+  "nominal_time_estimate_s": 13.854545454545455,
+  "distance_measured": false,
+  "estimated_speed_cm_s": 11.0,
+  "settings": {
+    "speed": 25,
+    "max_turn": 10,
+    "position_gain": 40.0,
+    "heading_gain": 3.0,
+    "max_target_heading": 4.0,
+    "abort_heading": 10.0,
+    "min_confidence": 0.5,
+    "smoothing": 0.5,
+    "turn_rate": 40.0,
+    "turn_slowdown": 0.0,
+    "coast_full": 0.3,
+    "coast_stop": 1.0,
+    "coast_decay": 0.5,
+    "lost_limit": 3.0,
+    "resume_frames": 2,
+    "prior_seconds": 0.3,
+    "max_sample_age": 0.15
+  },
+  "reason": "Centered reference not reliably tracked",
+  "camera_exposure": {
+    "mode": "manual",
+    "requested": {
+      "AeEnable": false,
+      "ExposureTime": 5000,
+      "AnalogueGain": 7.80897024106053,
+      "ExposureTimeMode": 1,
+      "AnalogueGainMode": 1
+    },
+    "gain_limited": false,
+    "observed": {
+      "ExposureTime": 25048,
+      "AnalogueGain": 1.4992679357528687,
+      "DigitalGain": 1.0005172491073608
+    }
+  }
+}
