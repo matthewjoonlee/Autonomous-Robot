@@ -327,6 +327,33 @@ Runs `run_20261011_212015_704644` (straight), `212215_684522` (left), `212513_82
 
 A rough closed-loop model from these measurements (dead zone 4.5, about 0.7 deg/s per turn unit above it, 14 cm/s) reproduced the observed steady offsets and the nudge abort with the old controller. With these changes it recovered an 11-degree nudge to within about 0.6 cm and a 15-degree nudge after about 2 s without the lane; a heading gain of 5 or position gain 80 added weaving. Replaying the suite with the new code tracks nudge frames 200-202 and searches with full right turn at frame 203 instead of aborting. Nudge frames 200-202 were added to the regression set. Gains remain provisional; steering authority (turn 10 is about 3-4 deg/s) limits how fast large nudges recover. Possible next steps if needed: a steering-direction asymmetry check (calibration suggested right turns respond more strongly) and a validated turn limit above 10.
 
+### Second recorded course suite (October 11, 2026)
+
+Runs `run_20261011_214721_248543` (straight), `214821_207942` (left), `214940_946079` (right), and `215102_496234` (nudge), with the nudge-recovery controller and turn limit 20. One earlier attempt (`214658_543603`) stopped at the reference check. No frames were dropped.
+
+| Trial | Lateral RMS | Lane tracked | Operator note |
+| --- | ---: | ---: | --- |
+| Straight | 2.6 px (was ~10) | 100% | a little to the right but mostly straight |
+| Left | 17.1 px (incl. start offset) | 99.1% | perfectly centered |
+| Right | 31.0 px (incl. ~5 cm start offset) | 100% | a little to the right; should correct a little faster |
+| Nudge | 9.3 px | 100% | corrected well with nudges |
+
+- The nudge trial reached 12.1 degrees and a 273 px image error while tracking every frame, then finished within 0.6 px. It ended at the estimated-distance stop.
+- Measured steering response (0.25 s windows): turn 4-6 gives under 1 deg/s, about 10 gives 6-8 deg/s, 12-20 about 9 deg/s, roughly 0.95 deg/s per unit above 4.5. Left and right were similar; turn 20 caused no reported problem.
+- Right trial: heading followed its target closely, but a 5 cm offset requested only about 4.5 degrees, shrinking as it closed, so correction had a time constant of about 5 s. Raising position gain is the fix, not more steering.
+- Distance estimate bug: it integrated time from each motor command to the next decision and missed the motor serial write (about one third of each 47 ms cycle). Straight/left/right ended by Enter at 10.6 s, consistent with 5 ft at 14 cm/s, but the estimate read about 100 cm; the nudge run's "152 cm" auto-stop was about 7 ft of real travel (15.9 s).
+- "A little to the right" with 2.6 px lateral RMS means the robot held the captured reference; center the robot carefully when the reference is captured.
+- Mining flagged left-trial frame 172: a correct fit at confidence 0.32, just under the 0.35 trust threshold. Confirmed as a regression label.
+
+Changes: distance integrates between consecutive decision times (new test with 15 ms motor writes catches the old bug); `position_gain` 60 to 90 and `max_target_heading` 6 to 8 degrees. The model, updated with the measured steering response, shows about 1.5x faster settling (5 cm offset: 9.5 to 6.3 s) without the extra weaving of gain 120+. Replay of the right trial targets up to 7.2 degrees (was 4.9); the straight trial is unchanged.
+
+Edge starts: the next left/right trials start half off the road at the edge, as graded ("recover from either half-off-road start within 5 feet"). That is about 15 cm, roughly 140 px of near-row image offset at ~9 px/cm, so the lane should stay in view, with the border-cut side measured from the dashes. Two changes support it:
+
+- No search prior before the lane is first found. The robot is moved after the centered reference is captured, and a prior at the reference would reject a lane 140 px away (64 px gate) for the first 0.3 s.
+- `max_target_heading` 8 to 12 degrees. In the model, a 15 cm start first reaches within 2 cm at about 3.7 ft with 8 degrees and about 3.0 ft with 12 (15-20 degrees adds little). The model has been optimistic, so the margin matters. Turning toward the lane moves it back across the image, so 12 degrees keeps it in view; small offsets and nudges never reach the limit.
+
+A loop test shifts the centered image 150 px and requires tracking from the first frame with a full 12-degree approach; it fails under the old reference prior. No half-off-road frames exist yet, so detection from the edge is unverified until this suite is recorded.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.

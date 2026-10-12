@@ -16,3 +16,4 @@ track_calibration/session_20261005_172428_111633/004_centered_rotated_left.jpg,,
 centering_results/run_20261011_212713_385597/frames/frame_00200.jpg,0.7873,0.7301,confirmed,"lane fit, visually checked",nudge rotation; lane moving ~40 px/frame toward image edge
 centering_results/run_20261011_212713_385597/frames/frame_00201.jpg,0.8419,0.7631,confirmed,"lane fit, visually checked",nudge rotation; lane moving ~40 px/frame toward image edge
 centering_results/run_20261011_212713_385597/frames/frame_00202.jpg,0.9028,0.8169,confirmed,"lane fit, visually checked",nudge rotation; lane moving ~40 px/frame toward image edge
+centering_results/run_20261011_214821_207942/frames/frame_00172.jpg,0.6457,0.5991,confirmed,"interpolated (lost), visually checked",low-confidence (0.32) but correct fit; second suite left trial

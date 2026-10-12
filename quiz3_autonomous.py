@@ -23,9 +23,9 @@ class Settings:
     # Below speed 25, so mixed mode never reverses the inner wheel. The heading
     # loop only asks for more than 10 when ~3+ degrees off, i.e. during recovery.
     max_turn: int = 20
-    position_gain: float = 60.0  # Degrees of target heading per normalized lateral error; provisional.
+    position_gain: float = 90.0  # Degrees of target heading per normalized lateral error; provisional.
     heading_gain: float = 3.0    # Physical turn units per degree; provisional.
-    max_target_heading: float = 6.0
+    max_target_heading: float = 12.0  # Approach angle when far off, e.g. a half-off-road start.
     abort_heading: float = 45.0  # Runaway guard. A nudge rotated the robot ~11 deg and was recoverable.
     min_confidence: float = 0.35
     smoothing: float = 0.5       # Weight of each new lane measurement; 1 disables filtering.
@@ -143,13 +143,15 @@ class LaneTracker:
 
     def __init__(self, reference, now, settings):
         self.settings = settings
-        self.fit = reference["fit"]
+        # No search prior until the lane is first found: the robot may have been
+        # moved (e.g. to a half-off-road start) after the reference was captured.
+        self.fit = None
         self.lateral = 0.0
         self.seen = now
         self.seen_heading = 0.0
 
     def prior(self, now, heading):
-        if now - self.seen > self.settings.prior_seconds:
+        if self.fit is None or now - self.seen > self.settings.prior_seconds:
             return None
         slope, intercept = self.fit
         return slope, intercept - self.settings.rotation_error_per_deg * (heading - self.seen_heading)
@@ -229,6 +231,7 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
     count = 0
     distance = 0.0
     last_speed = 0
+    previous = 0.0  # Decision times since start; the gap between them includes motor I/O.
     controller = Controller(reference, 0.0, settings)  # Times are seconds since start.
     try:
         while clock() < deadline:
@@ -244,7 +247,8 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
             now = clock()
             row = new_row(now - start, count, now - capture_start, summary)
             records.append(row)
-            distance += speed_cm_s * last_speed / settings.speed * (now - last_command)
+            distance += speed_cm_s * last_speed / settings.speed * (now - start - previous)
+            previous = now - start
             row["distance_cm"] = round(distance, 1)
             if max_distance_cm is not None and distance >= max_distance_cm:
                 row["state"] = "estimated_distance"
@@ -414,8 +418,10 @@ def main(argv=None):
         print(f"Results: {output}")
         instructions = {
             "straight": "Keep centered and straight; no pushes during this trial.",
-            "left": "Now slide approximately 3 cm LEFT without rotating; keep this centered reference.",
-            "right": "Now slide approximately 3 cm RIGHT without rotating; keep this centered reference.",
+            "left": "Now slide LEFT to the edge, half the robot off the road, pointing straight; "
+                    "keep this centered reference.",
+            "right": "Now slide RIGHT to the edge, half the robot off the road, pointing straight; "
+                     "keep this centered reference.",
             "nudge": "Start centered. After forward motion begins, apply one small sideways foot nudge.",
         }
         print(instructions[args.trial])

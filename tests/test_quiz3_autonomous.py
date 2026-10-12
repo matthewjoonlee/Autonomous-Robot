@@ -84,17 +84,17 @@ class CenteringTests(unittest.TestCase):
     def test_heading_feedback_straightens_at_reference(self):
         self.assertGreater(command(heading=3)["raw_turn"], 0)
         self.assertLess(command(heading=-3)["raw_turn"], 0)
-        self.assertEqual(command(0.002)["raw_turn"], 0)
+        self.assertEqual(command(0.001)["raw_turn"], 0)
 
     def test_commands_are_limited(self):
         result = command(0.8, -4)
-        self.assertEqual(result["target_heading_deg"], 6)
+        self.assertEqual(result["target_heading_deg"], 12)
         self.assertEqual(result["raw_turn"], -20)
         self.assertEqual(result["speed"], 25)
 
     def test_small_corrections_are_lifted_past_motor_dead_zone(self):
         small = command(0.004)
-        self.assertTrue(0.5 <= small["turn"] < 1)
+        self.assertTrue(0.5 <= small["turn"] < 1.5)
         self.assertEqual(small["physical_turn"], 5)
         self.assertEqual(command(0.004, settings=replace(Settings(), turn_deadzone=0))["physical_turn"], 1)
         self.assertEqual(command(-0.004)["physical_turn"], -5)
@@ -151,6 +151,7 @@ class CenteringTests(unittest.TestCase):
     def test_search_window_follows_rotation(self):
         settings = Settings()
         tracker = LaneTracker({"fit": (0.1, 0.6)}, 0.0, settings)
+        self.assertIsNone(tracker.prior(0.0, 0))  # Robot may have moved after the reference.
         tracker.update({"status": "tracked", "confidence": 0.9, "fit": (0.1, 0.65)}, 0.0, 0, 0.04)
         slope, intercept = tracker.prior(0.08, -2)
         self.assertEqual(slope, 0.1)
@@ -192,6 +193,19 @@ class CenteringTests(unittest.TestCase):
         self.assertEqual(rows[-1]["state"], "driving")
         self.assertEqual(len(motors.stops), 1)
 
+    def test_half_off_road_start_finds_lane_immediately_and_steers_back(self):
+        good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
+        # Robot moved left after the centered reference: the lane appears ~150 px right.
+        shifted = cv2.warpAffine(good, np.float32([[1, 0, 150], [0, 1, 0]]), (640, 480),
+                                 borderMode=cv2.BORDER_REPLICATE)
+        camera, imu, motors, reference, clock, rows, frames = self.setup_loop([shifted] * 6, [0] * 6)
+        control_loop(camera, imu, motors, reference, 0, 0.22, Settings(), rows, frames, clock, clock.sleep)
+        self.assertTrue(all(row["state"] == "driving" for row in rows[:5]))
+        self.assertGreater(rows[0]["near_error_px"], 120)
+        turns = [row["physical_turn"] for row in rows[:5]]
+        self.assertTrue(all(turn >= 0 for turn in turns) and max(turns) > 4)  # Right, toward the lane.
+        self.assertEqual(max(row["target_heading_deg"] for row in rows[:5]), 12)
+
     def test_persistent_loss_searches_then_faults(self):
         good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
         bad = np.zeros_like(good)
@@ -215,6 +229,19 @@ class CenteringTests(unittest.TestCase):
         self.assertLess(rows[-2]["distance_cm"], 5)
         self.assertEqual(len(motors.commands), len(rows) - 1)
         self.assertTrue(motors.stops)
+
+    def test_distance_estimate_includes_motor_command_time(self):
+        class SlowMotors(Motors):
+            def drive(self, speed, turn):
+                super().drive(speed, turn)
+                self.clock.sleep(0.015)  # Serial writes took ~1/3 of each cycle on the Pi.
+
+        good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
+        camera, imu, _, reference, clock, rows, frames = self.setup_loop([good] * 30, [0] * 30)
+        control_loop(camera, imu, SlowMotors(clock), reference, 0, 1.0, Settings(), rows, frames, clock,
+                     clock.sleep, max_distance_cm=1000, speed_cm_s=14)
+        driven = rows[-1]["elapsed_s"] - rows[0]["elapsed_s"]
+        self.assertAlmostEqual(rows[-1]["distance_cm"], 14 * driven, delta=0.5)
 
     def test_manual_exposure_gain_is_limited_and_logged(self):
         class ExposureCamera:
