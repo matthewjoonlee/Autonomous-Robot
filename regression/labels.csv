@@ -13,3 +13,6 @@ vision_results/run_20261005_174624_462341/raw/frame_00018.png,,,confirmed,visual
 vision_results/run_20261005_174624_462341/raw/frame_00020.png,,,confirmed,visually checked,"lane sliver at image edge, no dashes"
 vision_results/run_20261005_174624_462341/raw/frame_00021.png,,,confirmed,visually checked,"lane sliver at image edge, no dashes"
 track_calibration/session_20261005_172428_111633/004_centered_rotated_left.jpg,,,confirmed,visually checked,"lane sliver at image edge, no dashes"
+centering_results/run_20261011_212713_385597/frames/frame_00200.jpg,0.7873,0.7301,confirmed,"lane fit, visually checked",nudge rotation; lane moving ~40 px/frame toward image edge
+centering_results/run_20261011_212713_385597/frames/frame_00201.jpg,0.8419,0.7631,confirmed,"lane fit, visually checked",nudge rotation; lane moving ~40 px/frame toward image edge
+centering_results/run_20261011_212713_385597/frames/frame_00202.jpg,0.9028,0.8169,confirmed,"lane fit, visually checked",nudge rotation; lane moving ~40 px/frame toward image edge

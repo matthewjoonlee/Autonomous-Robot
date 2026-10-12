@@ -52,8 +52,8 @@ def replay(run, overrides=()):
     """Return (settings, reference, replayed rows, per-row detections, coverage)."""
     rows, outcome, images = load_run(run)
     recorded = outcome.get("settings", {})
-    settings = tuned(Settings(speed=recorded.get("speed", 25), max_turn=recorded.get("max_turn", 10)),
-                     overrides)
+    # Current code's settings; only the recorded speed is kept, since it matches the recorded motion.
+    settings = tuned(Settings(speed=recorded.get("speed", 25)), overrides)
     reference_frame = read_image(run / "reference_raw.png")
     reference = detect_lane(reference_frame)
     if reference["fit"] is None:
@@ -105,7 +105,7 @@ def events(rows, detections, settings):
     found = []
     for index, row in enumerate(rows):
         label = interpolated(index, rows, detections, trusted)
-        if row["state"] in ("coasting", "waiting"):
+        if row["state"] == "searching":
             found.append((index, "lost", label))
         elif trusted[index] and label is not None:
             near = near_far(detections[index][1]["fit"])[0]
@@ -122,7 +122,7 @@ def overlay(frame, detection, reference, row, label=None, kind=None):
         points = [(int(x * width), int(y * height)) for x, y in zip(label, (NEAR_Y, FAR_Y))]
         cv2.line(canvas, points[0], points[1], (255, 0, 255), 2)
     text = (f"#{row['frame_id']} t={row['elapsed_s']:.2f}s {kind or row['state']} speed {row['speed']} "
-            f"turn {row['turn']:+.1f} filt {row['filtered_error']} lost {row['lost_s']}s")
+            f"turn {row['turn']:+.1f} lateral {row['lateral_error']} lost {row['lost_s']}s")
     cv2.rectangle(canvas, (0, height - 24), (width, height), (0, 0, 0), -1)
     cv2.putText(canvas, text, (6, height - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
     return canvas
@@ -168,7 +168,7 @@ def report(run, overrides, video=False, mine=False, limit=24):
           f"  trial={outcome.get('trial')}  ended: {outcome.get('reason')}")
     if coverage < 0.95:
         print(f"  Only {coverage:.0%} of frames were recorded; lost-lane timing in replay is approximate.")
-    changed = {key: getattr(settings, key) for key in TUNABLE
+    changed = {key: getattr(settings, key) for key in TUNABLE + ("max_turn", "abort_heading")
                if outcome.get("settings", {}).get(key) not in (None, getattr(settings, key))}
     if changed:
         print(f"  Replay settings differ from the run: {changed}")

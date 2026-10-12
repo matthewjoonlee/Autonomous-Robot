@@ -66,8 +66,8 @@ class Motors:
         self.stops.append(self.clock())
 
 
-def command(offset=0.0, heading=0.0, lost_for=0.0, previous_turn=0.0, dt=1.0, settings=Settings()):
-    return choose_command(offset, heading, lost_for, previous_turn, dt, settings)
+def command(lateral=0.0, heading=0.0, lost_for=0.0, previous_turn=0.0, dt=1.0, settings=Settings()):
+    return choose_command(lateral, heading, lost_for, previous_turn, dt, settings)
 
 
 class CenteringTests(unittest.TestCase):
@@ -88,56 +88,74 @@ class CenteringTests(unittest.TestCase):
 
     def test_commands_are_limited(self):
         result = command(0.8, -4)
-        self.assertEqual(result["target_heading_deg"], 4)
-        self.assertEqual(result["raw_turn"], -10)
+        self.assertEqual(result["target_heading_deg"], 6)
+        self.assertEqual(result["raw_turn"], -20)
         self.assertEqual(result["speed"], 25)
 
-    def test_small_errors_steer_proportionally_without_deadband(self):
-        self.assertGreater(command(0.004)["turn"], 0)
-        self.assertLess(command(-0.004)["turn"], 0)
+    def test_small_corrections_are_lifted_past_motor_dead_zone(self):
+        small = command(0.004)
+        self.assertTrue(0.5 <= small["turn"] < 1)
+        self.assertEqual(small["physical_turn"], 5)
+        self.assertEqual(command(0.004, settings=replace(Settings(), turn_deadzone=0))["physical_turn"], 1)
+        self.assertEqual(command(-0.004)["physical_turn"], -5)
+        self.assertEqual(command(0.8, heading=-1)["physical_turn"], 20)
 
     def test_turn_changes_at_bounded_rate(self):
         self.assertAlmostEqual(command(0.8, dt=0.04)["turn"], 1.6)
-        self.assertAlmostEqual(command(0.8, previous_turn=9.0, dt=0.04)["turn"], 10)
+        self.assertAlmostEqual(command(0.8, previous_turn=9.0, dt=0.04)["turn"], 10.6)
+        self.assertAlmostEqual(command(0.8, heading=-4, previous_turn=19.0, dt=0.04)["turn"], 20)
         self.assertAlmostEqual(command(-0.8, previous_turn=5.0, dt=0.04)["turn"], 3.4)
 
-    def test_speed_ramps_down_while_lane_is_lost(self):
-        speeds = [command(lost_for=t)["speed"] for t in (0, 0.3, 0.65, 0.9, 1.0, 2.0)]
-        self.assertEqual(speeds[:2], [25, 25])
-        self.assertTrue(0 < speeds[3] < speeds[2] < 25)
-        self.assertEqual(speeds[4:], [0, 0])
-        self.assertEqual(command(0.8, lost_for=1.5)["turn"], 0)
+    def test_keeps_driving_and_steering_back_while_lane_is_unseen(self):
+        # Nudged 12 deg left with the lane last seen to the right: full speed, steer right.
+        result = command(0.03, heading=-12, lost_for=2.5)
+        self.assertEqual(result["speed"], 25)
+        self.assertEqual(result["physical_turn"], 20)
         with self.assertRaisesRegex(RuntimeError, "Lane not found"):
             command(lost_for=3.0)
 
+    def test_nudge_sized_rotation_does_not_abort(self):
+        self.assertEqual(command(heading=-20)["physical_turn"], 20)
+        self.assertEqual(command(heading=30)["physical_turn"], -20)
+        # Normal tracking stays gentle: a 1 degree heading error uses well under 10.
+        self.assertLess(abs(command(heading=1)["physical_turn"]), 10)
+
     def test_optional_slowdown_during_large_turns(self):
         settings = replace(Settings(), turn_slowdown=0.2)
-        self.assertEqual(command(0.8, settings=settings)["speed"], 20)
+        self.assertEqual(command(0.8, heading=-4, settings=settings)["speed"], 20)
         self.assertEqual(command(settings=settings)["speed"], 25)
 
     def test_faults_do_not_produce_commands(self):
-        for offset, heading, lost_for in [
-            (None, 0, 0), (float("nan"), 0, 0), (0, None, 0), (0, 10, 0), (0, -10, 0), (0, 0, 5),
+        for lateral, heading, lost_for in [
+            (None, 0, 0), (float("nan"), 0, 0), (0, None, 0), (0, 45, 0), (0, -45, 0), (0, 0, 5),
         ]:
-            with self.subTest(offset=offset, heading=heading, lost_for=lost_for):
+            with self.subTest(lateral=lateral, heading=heading, lost_for=lost_for):
                 with self.assertRaises(RuntimeError):
-                    command(offset, heading, lost_for)
+                    command(lateral, heading, lost_for)
 
-    def test_tracker_holds_and_relaxes_estimate_on_unusable_frames(self):
-        reference = {"fit": (0.1, 0.6)}
-        tracker = LaneTracker(reference, 0.0, Settings())
+    def test_tracker_removes_rotation_and_holds_estimate_while_unseen(self):
+        settings = Settings()
+        tracker = LaneTracker({"fit": (0.1, 0.6)}, 0.0, settings)
         tracked = {"status": "tracked", "confidence": 0.9, "fit": (0.1, 0.65)}
         lost = {"status": "line_lost", "confidence": 0.0, "fit": None}
-        self.assertTrue(tracker.update(tracked, 0.04, 0.04))
-        self.assertTrue(tracker.update(tracked, 0.04, 0.08))
-        self.assertAlmostEqual(tracker.offset, 0.03)
-        self.assertEqual(tracker.prior(0.08), (0.1, 0.65))
-        self.assertFalse(tracker.update(lost, None, 0.12))
-        self.assertTrue(0 < tracker.offset < 0.03)
-        self.assertEqual(tracker.streak, 0)
-        self.assertIsNone(tracker.prior(0.5))
-        weak = dict(tracked, confidence=0.3)
-        self.assertFalse(tracker.update(weak, 0.5, 0.16))
+        # Pure rotation: 10 deg left shifts the lane right but is not a sideways offset.
+        self.assertTrue(tracker.update(tracked, 10 * settings.rotation_error_per_deg, -10, 0.04))
+        self.assertAlmostEqual(tracker.lateral, 0)
+        self.assertTrue(tracker.update(tracked, 0.04, 0, 0.08))
+        self.assertTrue(tracker.update(tracked, 0.04, 0, 0.12))
+        self.assertAlmostEqual(tracker.lateral, 0.03)
+        self.assertFalse(tracker.update(lost, None, -5, 0.16))
+        self.assertAlmostEqual(tracker.lateral, 0.03)  # Held, so steering keeps toward the lane.
+        self.assertFalse(tracker.update(dict(tracked, confidence=0.3), 0.5, 0, 0.2))
+
+    def test_search_window_follows_rotation(self):
+        settings = Settings()
+        tracker = LaneTracker({"fit": (0.1, 0.6)}, 0.0, settings)
+        tracker.update({"status": "tracked", "confidence": 0.9, "fit": (0.1, 0.65)}, 0.0, 0, 0.04)
+        slope, intercept = tracker.prior(0.08, -2)
+        self.assertEqual(slope, 0.1)
+        self.assertAlmostEqual(intercept, 0.65 + 2 * settings.rotation_error_per_deg)
+        self.assertIsNone(tracker.prior(0.5, 0))
 
     def setup_loop(self, frames, headings, delay=0):
         clock = Clock()
@@ -154,37 +172,49 @@ class CenteringTests(unittest.TestCase):
             [good, bad, bad, good, good, good], [0] * 6)
         control_loop(camera, imu, motors, reference, 0, 0.18, Settings(), rows, frames, clock, clock.sleep)
         self.assertEqual([row["state"] for row in rows[:5]],
-                         ["driving", "coasting", "coasting", "driving", "driving"])
+                         ["driving", "searching", "searching", "driving", "driving"])
         self.assertEqual([speed for _, speed, _ in motors.commands], [25] * 5)
         self.assertEqual(len(motors.stops), 1)  # Only the final stop.
         self.assertEqual(frames.ids, [row["frame_id"] for row in rows])  # Every frame recorded.
 
-    def test_persistent_loss_slows_waits_then_faults(self):
+    def test_nudge_off_the_lane_steers_back_then_reacquires(self):
+        good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
+        bad = np.zeros_like(good)
+        sequence = [good] * 3 + [bad] * 10 + [good] * 3
+        headings = [0, 0, 0] + [-12] * 10 + [-2] * 3
+        camera, imu, motors, reference, clock, rows, frames = self.setup_loop(sequence, headings)
+        control_loop(camera, imu, motors, reference, 0, 0.04 * len(sequence) - 0.02, Settings(),
+                     rows, frames, clock, clock.sleep)
+        searching = [row for row in rows if row["state"] == "searching"]
+        self.assertEqual(len(searching), 10)
+        self.assertTrue(all(row["speed"] == 25 for row in searching))
+        self.assertGreater(searching[-1]["physical_turn"], 4)  # Turning right, back toward the lane.
+        self.assertEqual(rows[-1]["state"], "driving")
+        self.assertEqual(len(motors.stops), 1)
+
+    def test_persistent_loss_searches_then_faults(self):
         good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
         bad = np.zeros_like(good)
         camera, imu, motors, reference, clock, rows, frames = self.setup_loop(
             [good] + [bad] * 90, [0] * 91)
         with self.assertRaisesRegex(RuntimeError, "Lane not found"):
             control_loop(camera, imu, motors, reference, 0, 5, Settings(), rows, frames, clock, clock.sleep)
-        speeds = [speed for _, speed, _ in motors.commands]
-        self.assertEqual(speeds[:8], [25] * 8)
-        self.assertEqual(speeds, sorted(speeds, reverse=True))
-        self.assertTrue(all(t < 1.0 for t, _, _ in motors.commands))
-        self.assertIn("waiting", [row["state"] for row in rows])
+        self.assertTrue(all(speed == 25 for _, speed, _ in motors.commands))
+        self.assertTrue(all(t < 3.0 for t, _, _ in motors.commands))
         self.assertTrue(motors.stops)
-        self.assertEqual(rows[-1]["speed"], 0)
+        self.assertEqual(rows[-1]["state"], "Lane not found; run stopped")
 
-    def test_resume_after_full_stop_needs_consecutive_lane_frames(self):
+    def test_estimated_distance_ends_run(self):
         good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
-        bad = np.zeros_like(good)
-        sequence = [good] + [bad] * 30 + [good, bad, good, good, good]
-        camera, imu, motors, reference, clock, rows, frames = self.setup_loop(sequence, [0] * len(sequence))
-        control_loop(camera, imu, motors, reference, 0, 0.04 * 35 - 0.02, Settings(),
-                     rows, frames, clock, clock.sleep)
-        states = [row["state"] for row in rows[30:35]]
-        self.assertEqual(states, ["waiting", "waiting", "waiting", "waiting", "driving"])
-        self.assertEqual(rows[34]["speed"], 25)
-        self.assertGreater(motors.commands[-1][0], 1.3)
+        camera, imu, motors, reference, clock, rows, frames = self.setup_loop([good] * 20, [0] * 20)
+        reason = control_loop(camera, imu, motors, reference, 0, 5, Settings(), rows, frames, clock,
+                              clock.sleep, max_distance_cm=5, speed_cm_s=14)
+        self.assertEqual(reason, "estimated_distance")
+        self.assertEqual(rows[-1]["state"], "estimated_distance")
+        self.assertGreaterEqual(rows[-1]["distance_cm"], 5)
+        self.assertLess(rows[-2]["distance_cm"], 5)
+        self.assertEqual(len(motors.commands), len(rows) - 1)
+        self.assertTrue(motors.stops)
 
     def test_manual_exposure_gain_is_limited_and_logged(self):
         class ExposureCamera:

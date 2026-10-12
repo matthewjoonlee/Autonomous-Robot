@@ -303,6 +303,30 @@ Each run now produces data that improves the next one.
 
 Per-suite workflow: run `python quiz3_course.py --execute` (optionally with `--set ...`), upload `centering_results/` with the usual commit/push, then on the development machine run `python replay_run.py centering_results/<new runs> --mine` and `python run_metrics.py centering_results`. Review candidates, confirm labels, fix any failing regression frames, and compare scores before the next suite. Expect about 60 MB of JPEGs per four-trial suite in git. Eighty-one simulated checks pass, including a recorded-then-replayed run that reproduces the live decisions.
 
+### First recorded course suite (October 11, 2026)
+
+Runs `run_20261011_212015_704644` (straight), `212215_684522` (left), `212513_828268` (right), and `212713_385597` (nudge). One earlier attempt (`211947_614675`) stopped at the reference check. Every frame was recorded with none dropped; the loop ran at 20-22 fps with 25-29 ms mean processing.
+
+- The lane detector tracked 100% of frames in the straight, left, and right trials; every tracked frame across the suite was a correct fit.
+- Operator notes: straight "pretty centered, a little movement to the right"; left "a little too much overcorrection to the right", and it ran about 9.5 ft before Enter; right "didn't correct enough to the left".
+- Nudge: the push rotated the robot from -0.1 to -10.75 degrees in about 0.4 s. The lane stayed visible and correctly tracked (174 px right of reference) with the controller already at full right turn; the 10-degree heading limit then ended the run. The run was recoverable.
+- Steering dead zone: across all four runs, 0.5 s windows with mean turn command 1.5-4.5 rotated the robot about +0.1 deg/s (noise); only commands of about 5 and above turned it. Most corrections fell in the dead zone, leaving steady 10-15 px offsets.
+- Rotation vs offset: capture 005 shows 13.1 degrees of rotation moves the near-row lane -272 px (about 21 px per degree), so most of the nudge's 174 px image error was rotation. The left trial's ~3 cm slide read about 28 px of offset after removing rotation (roughly 9 px/cm, uncertain).
+- Speed: about 14 cm/s at command 25 (13.5-15 cm/s across trials), not 11, so 5 ft takes about 11 s and the old 27.7 s time fallback was about 13 ft.
+- Replay with the code that ran reproduced the recorded scores (tracked %, error RMS within 0.1 px, jitter). It also showed a fragility: when a nudge frame's confidence dipped under 0.5, the search window stayed put while the lane moved about 40 px/frame and outran the 64 px gate.
+
+### Nudge recovery and dead-zone compensation
+
+1. Lateral estimate: the IMU-measured rotation (`rotation_error_per_deg` = 0.0323, about 21 px per degree) is removed from the near-row image error, so rotation is not mistaken for sideways offset. The estimate sets the target heading (`position_gain` 60, max 6 degrees); IMU heading regulates the turn as before.
+2. Lane out of view: the lateral estimate is held and the robot keeps driving at speed 25, steering on IMU heading toward the side where the lane was. It returns to normal tracking as soon as the lane is found; 3 s without the lane (about 42 cm) stops the run. The slow-to-stop-and-wait behavior is removed.
+3. The search window for the next frame is shifted by the rotation since the lane was last seen, and `min_confidence` is 0.35 (17 correct frames in this suite fell between 0.3 and 0.5).
+4. Dead-zone compensation: turn commands of at least 0.5 are mapped to 4 plus the remaining range, so small corrections actually rotate the robot (`turn_deadzone`, tunable; 0 disables).
+5. Heading abort raised from 10 to 45 degrees as a runaway guard rather than a disturbance limit.
+7. Steering limit raised from 10 to 20 (`--max-turn`, at most 20) without a separate calibration run, by decision to test it together with the other changes. Turn 10 gave only about 3-4 deg/s. The heading loop asks for more than 10 only when about 3+ degrees off, so normal tracking stays gentle (replay: at most 7 before the nudge) and recovery gets the extra authority (replay: ramps to 17 during the nudge). Staying below speed 25 should keep mixed mode from reversing the inner wheel. In the model, a 15-degree nudge was out of view 0.8 s instead of 2.1 s, and a 25-degree nudge recovered instead of stopping; the model's linear extrapolation of turn rate above 10 is unmeasured.
+6. Course runs now stop automatically at an estimated 5 ft (one mat), integrating commanded speed at the measured 14 cm/s (`--estimated-speed-cm-s`); Enter still stops sooner and the time fallback remains. Each row logs `distance_cm` and `lateral_error`; the scorecard adds estimated distance, lateral RMS, and search time.
+
+A rough closed-loop model from these measurements (dead zone 4.5, about 0.7 deg/s per turn unit above it, 14 cm/s) reproduced the observed steady offsets and the nudge abort with the old controller. With these changes it recovered an 11-degree nudge to within about 0.6 cm and a 15-degree nudge after about 2 s without the lane; a heading gain of 5 or position gain 80 added weaving. Replaying the suite with the new code tracks nudge frames 200-202 and searches with full right turn at frame 203 instead of aborting. Nudge frames 200-202 were added to the regression set. Gains remain provisional; steering authority (turn 10 is about 3-4 deg/s) limits how fast large nudges recover. Possible next steps if needed: a steering-direction asymmetry check (calibration suggested right turns respond more strongly) and a validated turn limit above 10.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.

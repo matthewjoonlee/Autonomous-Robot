@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 
 CENTERED_PX = 10  # |near-row image error| counted as centered.
-COLUMNS = ("tracked_pct", "lost_episodes", "longest_lost_s", "waiting_s", "rms_error_px",
+COLUMNS = ("distance_cm", "tracked_pct", "lost_episodes", "longest_lost_s", "search_s", "lateral_rms_px", "rms_error_px",
            "peak_error_px", "final_error_px", "centered_after_s", "turn_jitter",
            "turn_reversals", "max_heading_deg")
 
@@ -44,8 +44,12 @@ def score(rows, min_confidence=0.5):
     if lost_start is not None:
         longest = max(longest, times[-1] - lost_start)
 
-    waiting = sum(later - earlier for earlier, later, row in zip(times, times[1:], rows)
-                  if row.get("state") in ("waiting", "reacquiring"))
+    searching = sum(later - earlier for earlier, later, row in zip(times, times[1:], rows)
+                    if row.get("state") in ("searching", "coasting"))
+    distances = [number(row.get("distance_cm")) for row in rows if number(row.get("distance_cm")) is not None]
+    # Lateral error has the IMU-measured rotation removed (newer runs only).
+    lateral = [640 * number(row["lateral_error"]) for row, ok in zip(rows, trusted)
+               if ok and number(row.get("lateral_error")) is not None]
     turn_key = "turn" if "turn" in rows[0] else "physical_turn"
     moving = [number(row.get(turn_key)) or 0.0 for row in rows if (number(row.get("speed")) or 0) > 0]
     steps = [later - earlier for earlier, later in zip(moving, moving[1:])]
@@ -68,12 +72,14 @@ def score(rows, min_confidence=0.5):
 
     return {
         "frames": len(rows),
+        "distance_cm": rounded(distances[-1], 1) if distances else None,
         "duration_s": rounded(times[-1] - times[0]),
         "fps": rounded((len(rows) - 1) / (times[-1] - times[0]), 1) if times[-1] > times[0] else None,
         "tracked_pct": rounded(100 * sum(trusted) / len(rows), 1),
         "lost_episodes": episodes,
         "longest_lost_s": rounded(longest),
-        "waiting_s": rounded(waiting),
+        "search_s": rounded(searching),
+        "lateral_rms_px": rounded(math.sqrt(sum(x * x for x in lateral) / len(lateral)), 1) if lateral else None,
         "rms_error_px": rounded(math.sqrt(sum(e * e for _, e in errors) / len(errors)), 1) if errors else None,
         "peak_error_px": rounded(max(abs(e) for _, e in errors), 1) if errors else None,
         "final_error_px": rounded(sum(final) / len(final), 1) if final else None,
@@ -88,9 +94,11 @@ def describe(metrics):
     """One-line human summary printed after each run."""
     if not metrics.get("frames"):
         return "No telemetry recorded."
-    return (f"{metrics['frames']} frames at {metrics['fps']} fps | lane tracked {metrics['tracked_pct']}% | "
+    distance = f"~{metrics['distance_cm'] / 30.48:.1f} ft (estimated) | " if metrics.get("distance_cm") else ""
+    return (f"{distance}{metrics['frames']} frames at {metrics['fps']} fps | lane tracked {metrics['tracked_pct']}% | "
             f"lost {metrics['lost_episodes']}x (longest {metrics['longest_lost_s']}s) | "
-            f"error RMS {metrics['rms_error_px']} px, peak {metrics['peak_error_px']} px, "
+            f"lateral RMS {metrics['lateral_rms_px']} px | image error RMS {metrics['rms_error_px']} px, "
+            f"peak {metrics['peak_error_px']} px, "
             f"final {metrics['final_error_px']} px | turn jitter {metrics['turn_jitter']}, "
             f"reversals {metrics['turn_reversals']}")
 

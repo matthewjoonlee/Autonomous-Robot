@@ -1,0 +1,6 @@
+image,pose,status,confidence,near_error_px,near_error_normalized,image_direction_error,imu_delta_deg,diagnostic
+001_centered_straight.jpg,centered_straight,tracked,0.917,0.0,0.0,0.0,0.0,NEAR REFERENCE
+002_left_offset_straight.jpg,left_offset_straight,tracked,0.947,62.2,0.09715,0.03148,-0.875,LINE RIGHT OF REFERENCE
+003_right_offset_straight.jpg,right_offset_straight,tracked,0.925,-52.1,-0.08142,-0.03386,-0.0625,LINE LEFT OF REFERENCE
+004_centered_rotated_left.jpg,centered_rotated_left,line_lost,0.0,,,,-13.875,LINE LOST - no position estimate
+005_centered_rotated_right.jpg,centered_rotated_right,tracked,0.947,-272.3,-0.42543,-0.0381,13.125,ROTATED RIGHT
