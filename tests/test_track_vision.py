@@ -200,9 +200,24 @@ class TrackVisionTests(unittest.TestCase):
                 self.assertAlmostEqual(detection["fit"][0], 0, delta=0.01)
 
     def test_lane_prior_rejects_jump_to_other_strip(self):
-        frame = self.synthetic_track(lane=(40, 110))
+        frame = self.synthetic_track(lane=(40, 110), dashes=75)
         self.assertEqual(detect_lane(frame, (0.0, 340 / 640))["status"], "line_lost")
         self.assertEqual(detect_lane(frame)["status"], "tracked")
+
+    def test_dark_strip_without_dashes_is_not_lane(self):
+        # Off the mats after a nudge: a dark mat edge or floor reflection, no yellow dashes.
+        frame = self.synthetic_track(lane=(280, 400))
+        detection = detect_lane(frame)
+        self.assertEqual(detection["status"], "line_lost")
+        self.assertEqual(detection["dash_rows"], 0)
+        self.assertEqual(detect_lane(self.synthetic_track(lane=(280, 400), dashes=340))["status"], "tracked")
+
+    def test_floor_edge_after_nudge_is_rejected(self):
+        root = Path(__file__).resolve().parents[1]
+        for n in (156, 168, 180, 192):  # Pushed off the mats onto a shiny floor (lobby, 2026-10-12).
+            with self.subTest(frame=n):
+                frame = read_image(root / f"centering_results/run_20261012_155620_393593/frames/frame_{n:05d}.jpg")
+                self.assertNotEqual(detect_lane(frame)["status"], "tracked")
 
     def test_half_visible_lane_uses_dashes(self):
         detection = detect_lane(self.synthetic_track(lane=(0, 260), dashes=100))

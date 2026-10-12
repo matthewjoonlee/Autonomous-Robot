@@ -24,6 +24,8 @@ from test_imu import positive_number, signed_delta
 DEFAULT_SESSION = Path(__file__).resolve().parent / "track_calibration/session_20261005_172428_111633"
 ROI_TOP, ROI_BOTTOM = 0.56, 0.98
 NEAR_Y, FAR_Y = 0.85, 0.65
+REQUIRE_GREEN_SIDES = False
+MIN_DASH_ROWS = 8  # Rows with dash color on the fitted lane line; see detect_lane.
 
 
 def dark_track_support(hsv, x, y, w, h):
@@ -151,16 +153,20 @@ def detect_lane(frame, prior=None, gate=0.10, tolerance=0.02):
     """
     height, width = frame.shape[:2]
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    yellow = cv2.inRange(hsv, np.array([18, 85, 130]), np.array([38, 255, 255])) > 0
-    # Dark, unsaturated pixels are lane, except clearly green ones: in dim rooms the
-    # green mats fall under the brightness/saturation limits too. Bluish lighting
-    # pushed a third of the (blue-black) lane above saturation 120, so very dark
-    # blue-hued pixels also count.
     hue, saturation, value = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    # Mats: hue 39-57 in every room, but brightness 64-163 (dark under bright windows).
-    # The lane: hue 84-106, though in one room it dipped to 69-80 at brightness 55-76.
-    # So hue 30-60 is mat at any brightness; 60-75 only when bright enough to be mat.
+    # The dash brightness limit follows the green mats in the same frame: facing bright
+    # windows, the lobby image darkened until the dashes were brightness ~88 (mats ~68),
+    # while the fixed limit assumes mats ~130. Only darker frames scale.
+    roi = slice(int(height * ROI_TOP), int(height * ROI_BOTTOM))
+    mat = value[roi][(hue[roi] >= 30) & (hue[roi] < 60) & (saturation[roi] > 40)]
+    scale = float(np.clip(np.median(mat) / 130, 0.4, 1.0)) if mat.size > 500 else 1.0
+    yellow = (hue >= 18) & (hue <= 38) & (saturation >= 85) & (value >= 130)
+    dash_mask = (hue >= 18) & (hue <= 38) & (saturation >= 85) & (value >= 130 * scale)
+    # Mats: hue 39-57 in every room. The lane: hue 84-106, though in one room it dipped
+    # to 69-80 (dark). So hue 30-60 is mat at any brightness; 60-75 only when bright.
     green = (hue >= 30) & (saturation > 40) & ((hue < 60) | ((hue < 75) & (value >= 90)))
+    # Dark, not-too-saturated, non-green pixels are lane (bluish light raised lane
+    # saturation to ~115, hence the 135 limit); yellow fills the dashes in.
     lane = ((value < 125) & (saturation < 135) & ~green) | yellow
     kernel = np.ones((1, max(3, round(width / 40))), dtype=np.uint8)
     lane = cv2.morphologyEx(lane.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
@@ -172,6 +178,13 @@ def detect_lane(frame, prior=None, gate=0.10, tolerance=0.02):
         for a, b in zip(starts, ends):
             if not 0.05 * width < b - a < 0.7 * width:
                 continue
+            # The lane lies between green mats. A dark piece without green on a visible
+            # side (mat edge against the floor, floor reflections, chair legs) is not lane.
+            if REQUIRE_GREEN_SIDES:
+                left = a < 10 or green[y, a - 9:a - 2].mean() > 0.5
+                right = b > width - 10 or green[y, b + 2:b + 9].mean() > 0.5
+                if not (left and right):
+                    continue
             if 0 < a and b < width:
                 x = (a + b) / 2
             else:
@@ -225,6 +238,17 @@ def detect_lane(frame, prior=None, gate=0.10, tolerance=0.02):
     confidence = coverage * max(0.0, 1 - residual / 0.02)
     result["inliers"] = inliers
     if confidence < 0.3:
+        return result
+    # The real lane has yellow dashes down its middle. Dark edges between mat and floor,
+    # and dark floor reflections, do not: after a nudge pushed the robot off the mats,
+    # such lines had 0 rows with yellow on them, while real lanes had 32+ (99% of frames).
+    # `dash_mask` (above): saturation 85+ excludes pale floor reflections (S 40-56).
+    ys = np.arange(int(height * ROI_TOP), int(height * ROI_BOTTOM))
+    xs = np.round((slope * ys / height + intercept) * width).astype(int)
+    near_line = (xs[:, None] + np.arange(-10, 11)[None, :]).clip(0, width - 1)
+    dash_rows = int(dash_mask[ys[:, None], near_line].any(axis=1)[(xs >= 0) & (xs < width)].sum())
+    result["dash_rows"] = dash_rows
+    if dash_rows < MIN_DASH_ROWS:
         return result
     result.update(status="tracked", confidence=float(confidence),
                   fit=(float(slope), float(intercept)))

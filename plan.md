@@ -445,6 +445,14 @@ Replay of that run now commands a full turn back toward the track heading after 
 
 Runs `run_20261012_1541*`-`1548*` in a bright lobby (edge starts both sides: centered at 2.9-5.2 ft). Lane losses were the detector, not the new jump/turn-back rules (2 frames rejected in total). Bright windows set the exposure so the green mats came out dark (brightness ~68, hue 39, saturation ~109) and passed the dark-lane test; the lane was hue 103, saturation ~42, brightness ~43. Mat exclusion is now by hue: 30-60 at any brightness, 60-75 only at brightness 90+ (the first room's lane dipped to hue 69-80 at 55-76). On-mat frames in this room: 84% to 100% usable (median confidence 0.74 to 0.92); every other room unchanged. Later losses were the mats ending (~10-11 ft from these starts). Six lobby frames added to the regression set.
 
+### Exam room (lobby): false floor lines after a nudge
+
+The lobby is the test venue. In `run_20261012_155620_393593` a nudge pushed the robot off the mats onto the polished floor, and the detector accepted the dark border between mat and floor (with pale floor reflections) as the lane, confirmed the jump, and steered 12 degrees the wrong way.
+
+The real lane always has yellow dashes along it; those false lines had none that are saturated (their warm-looking pixels were pale reflections, saturation 40-56; lobby dashes median 100-114). A fit is now accepted only with dash-colored pixels (hue 18-38, saturation 85+) within 10 px of the line on at least 8 rows (`MIN_DASH_ROWS`). The dash brightness limit scales with the mats' brightness in the same frame, because facing the windows the lobby image darkened until dashes were brightness ~88. Lane and mat thresholds are unchanged. A green-on-both-sides filter (`REQUIRE_GREEN_SIDES`, off) and a lane-width check were tried and rejected: the polished floor reflects green, and widths overlapped.
+
+Results: every lobby run tracks 98-100% of on-mat frames, including the two latest; other rooms unchanged (good session 88%, older 96%). Of 16 post-nudge off-mat frames, 13 are rejected; the 3 accepted show the real lane. Replay of the nudge: instead of steering at the floor edge, the robot turns back toward the original heading and briefly follows the real lane when it is in view. Two very dark spots (mat brightness 38-51; `run_20261012_153318_001794`, `155416_416445`) still track about 10% of frames regardless of the dash rule; low light remains a weakness outside the exam room.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
