@@ -250,6 +250,16 @@ class CenteringTests(unittest.TestCase):
             measure_start(Camera(frames, clock), IMU([0.0] * 10), load(), Settings(),
                           clock=clock, sleep=clock.sleep)
 
+    def test_keep_searching_never_ends_leg_for_lost_lane(self):
+        good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
+        bad = np.zeros_like(good)
+        camera, imu, motors, reference, clock, rows, frames = self.setup_loop([good] + [bad] * 150, [0] * 151)
+        settings = replace(Settings(), lost_limit=float("inf"))
+        reason = control_loop(camera, imu, motors, reference, 0, 5.5, settings, rows, frames, clock, clock.sleep)
+        self.assertEqual(reason, "duration_complete")
+        self.assertGreater(rows[-2]["lost_s"], 5)
+        self.assertTrue(all(speed == 25 for _, speed, _ in motors.commands))
+
     def test_persistent_loss_searches_then_faults(self):
         good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
         bad = np.zeros_like(good)

@@ -394,6 +394,10 @@ Legs `run_20261011_222608_014418`, `222712_568548`, `222851_395272` (each starte
 - "A little off": the image shows a slight lens bend (near-half lane slope 0.03-0.15 below the far half), and in one stretch the image heading read about 4 degrees while the lateral estimate did not change, i.e. a few-degree heading bias worth roughly 2-3 cm. A quadratic fit did not improve physical consistency, so the straight-line fit stays. Plain straight legs without nudges would isolate this.
 - One frame previously labeled as a no-lane sliver (nudge run, frame 222) actually shows the dashes; relabeled.
 
+### Option: never stop for a lost lane
+
+`--keep-searching` disables the 3 s "Lane not found" limit, so a leg runs past the end of a short track (or through any lane loss) on IMU heading until the estimated distance, Enter, or 45 degrees. On the ~3 m track in the latest room, both legs stopped after the lane ended at the wall, with nudges in the last half meter. Off by default; the operator must stop the robot by Enter or the physical stop.
+
 ### End-of-lane stop removed
 
 In a short-track room every leg ended "End of lane ahead" about 0.5 m before the mat met the wall (leg 1 after ~147 cm; restarts nearby after 8-20 cm). By request the stop is removed: a leg now ends at the estimated distance, Enter, 3 s without the lane, or 45 degrees of rotation. Keep the end of the track clear, or press Enter, since a parked robot at the end is no longer avoided.

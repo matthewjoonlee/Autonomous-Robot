@@ -514,6 +514,9 @@ def main(argv=None):
                              "15 ft leg); 1 keeps all; 0 disables")
     parser.add_argument("--set", nargs="+", action="extend", default=[], metavar="KEY=VALUE",
                         help=f"tuning override, e.g. --set position_gain=30 turn_rate=30; keys: {', '.join(TUNABLE)}")
+    parser.add_argument("--keep-searching", action="store_true",
+                        help="never end a leg for losing the lane (e.g. past the end of the track); it keeps "
+                             "driving on IMU heading until the leg distance, Enter, or 45 deg of rotation")
     parser.add_argument("--output", type=Path, default=Path("centering_results"))
     args = parser.parse_args(argv)
     if args.leg_ft > 20:
@@ -526,6 +529,8 @@ def main(argv=None):
         settings = tuned(Settings(speed=args.speed, max_turn=args.max_turn), args.set)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.keep_searching:
+        settings = replace(settings, lost_limit=math.inf)
     camera = imu = saber = None
     started = False
     handlers = {}
@@ -568,8 +573,10 @@ def main(argv=None):
               f"(~{nominal:.0f} s, estimated from speed).")
         print("Stop other control programs. Keep a physical stop accessible; Ctrl+C stops.")
         print("Remote disconnect is not a guaranteed stop; hardware timeout is not yet verified.")
-        print(f"Each leg: it holds still ~0.5 s to find the lane and its heading, then drives. Lane unseen for "
-              f"{settings.lost_limit:g} s or {settings.abort_heading:g} deg of rotation ends the leg.")
+        lost = ("never ends the leg (--keep-searching)" if math.isinf(settings.lost_limit)
+                else f"for {settings.lost_limit:g} s ends the leg")
+        print(f"Each leg: it holds still ~0.5 s to find the lane and its heading, then drives. Lane unseen {lost}; "
+              f"{settings.abort_heading:g} deg of rotation ends the leg.")
         legs = run_session(camera, imu, saber, settings, load_center(), args.output, args.leg_ft,
                            args.estimated_speed_cm_s, args.record_every, args.execute, args.legs)
         print(f"Session finished after {legs} leg(s); motors stopped.")
