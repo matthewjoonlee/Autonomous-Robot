@@ -425,6 +425,10 @@ Legs `run_20261011_230521_064421` (center), `230602_508233`, `230634_327418`, `2
 - Legs 2 and 4 stopped "Lane not found" at about 10-11 ft because the mats ended (floor and a chair ahead), not a fault; they started farther down the track than legs 1 and 3.
 - Model check with the measured steering response: position gain 110 or 130 reaches center about 0.3-0.5 ft sooner (model, optimistic by ~1.35x versus these runs) with somewhat more small corrections. Not made default; try `--set position_gain=110` on edge starts and compare scores.
 
+### No distance limit in the touchscreen app
+
+By request, `lane_app.py` runs have no distance stop by default: a run ends on STOP, 3 s without the lane (for example past the end of the mats; `--keep-searching` disables this), 45 degrees of rotation, or a 10-minute safety time limit. `--leg-ft` (up to 100 ft) still sets a limit; `quiz3_autonomous.py` keeps its 15 ft default with the cap raised to 100 ft.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.

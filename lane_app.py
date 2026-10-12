@@ -4,8 +4,9 @@
 
 The screen shows what the camera sees, with the detected lane (green) and the
 calibrated center (cyan). Press START: the robot holds still ~0.5 s to measure
-where it is, then centers on the lane and drives straight until STOP, the leg
-distance (15 ft), or a fault (lane lost 3 s, 45 deg rotation). It then stops and
+where it is, then centers on the lane and drives straight until STOP or a fault
+(lane lost 3 s, e.g. past the end of the mats; 45 deg rotation). There is no
+distance limit unless --leg-ft is given. It then stops and
 waits for the next START. Each run is saved like any other leg for replay.
 Motor-free unless --execute.
 """
@@ -24,8 +25,7 @@ import numpy as np
 
 from calibrate_motors import bounded_int
 from calibrate_track import choose_front
-from quiz3_autonomous import (RECOVERABLE, TUNABLE, Settings, configure_motion_exposure, leg_timing, run_leg,
-                              tuned)
+from quiz3_autonomous import RECOVERABLE, TUNABLE, Settings, configure_motion_exposure, run_leg, tuned
 from test_imu import positive_number
 
 GREEN, CYAN, RED, WHITE = (0, 220, 0), (255, 255, 0), (0, 0, 255), (255, 255, 255)
@@ -85,7 +85,7 @@ class MotionWatch:
 
 
 class LaneApp:
-    def __init__(self, display, camera, imu, saber, settings, calibration, output_root, leg_ft=15.0,
+    def __init__(self, display, camera, imu, saber, settings, calibration, output_root, leg_ft=None,
                  speed_cm_s=14.0, record_every=3, execute=False, clock=time.monotonic, sleep=time.sleep):
         from lane_center import reference as center_reference
         self.display, self.camera, self.imu, self.saber = display, camera, imu, saber
@@ -148,7 +148,7 @@ class LaneApp:
             reason = str(exc)
         if self.saber is not None:
             self.saber.stop()
-        done = {"estimated_distance": f"reached {self.leg_ft:g} ft", "finish_marker": "stopped"}.get(reason, reason)
+        done = {"estimated_distance": f"reached {self.leg_ft or 0:g} ft", "finish_marker": "stopped"}.get(reason, reason)
         self.message = f"Run {self.legs}: {done}. Press START to run again."
         if not (reason in ("estimated_distance", "finish_marker") or reason.startswith(RECOVERABLE)):
             self.message = f"Run {self.legs} stopped: {reason}"
@@ -176,7 +176,8 @@ class LaneApp:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--execute", action="store_true", help="enable physical motor commands")
-    parser.add_argument("--leg-ft", type=positive_number, default=15.0, help="maximum distance per run (<= 20 ft)")
+    parser.add_argument("--leg-ft", type=positive_number,
+                        help="optional distance limit per run in feet (<= 100); default: no limit, STOP ends the run")
     parser.add_argument("--estimated-speed-cm-s", type=positive_number, default=14.0)
     parser.add_argument("--max-turn", type=bounded_int(1, 20), default=20)
     parser.add_argument("--camera", type=int)
@@ -188,8 +189,8 @@ def main(argv=None):
                         help=f"tuning overrides; keys: {', '.join(TUNABLE)}")
     parser.add_argument("--output", type=Path, default=Path("centering_results"))
     args = parser.parse_args(argv)
-    if args.leg_ft > 20:
-        parser.error("--leg-ft must be <= 20")
+    if args.leg_ft is not None and args.leg_ft > 100:
+        parser.error("--leg-ft must be <= 100")
     try:
         settings = tuned(Settings(max_turn=args.max_turn), args.set)
     except ValueError as exc:
@@ -235,9 +236,9 @@ def main(argv=None):
             saber.stop()
             saber.set_auto_stop(200)
             saber.set_ramping(8)
-        nominal, _ = leg_timing(args.leg_ft, args.estimated_speed_cm_s)
-        print(f"{'POWERED' if args.execute else 'MOTOR-FREE'}: use the touchscreen. START drives up to "
-              f"{args.leg_ft:g} ft (~{nominal:.0f} s); STOP stops; QUIT exits. Ctrl+C also stops.")
+        limit = f"up to {args.leg_ft:g} ft" if args.leg_ft else "with no distance limit"
+        print(f"{'POWERED' if args.execute else 'MOTOR-FREE'}: use the touchscreen. START drives {limit}; "
+              f"STOP stops; QUIT exits. Ctrl+C also stops.")
         app = LaneApp(display, camera, imu, saber, settings, load_center(), args.output, args.leg_ft,
                       args.estimated_speed_cm_s, args.record_every, args.execute)
         runs = app.run()

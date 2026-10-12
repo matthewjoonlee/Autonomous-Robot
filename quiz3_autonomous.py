@@ -368,6 +368,10 @@ def read_command():
 
 
 def leg_timing(leg_ft, estimated_speed_cm_s):
+    """(nominal seconds, time limit). `leg_ft=None` means no distance limit: the
+    leg runs until STOP/Enter or a fault, with a 10-minute safety time limit."""
+    if leg_ft is None:
+        return math.inf, 600.0
     nominal = leg_ft * 30.48 / estimated_speed_cm_s
     # A leg stops at the estimated distance or the operator's Enter; this is
     # only a bounded time fallback if the estimate is badly wrong.
@@ -424,7 +428,7 @@ def wait_for_placement(camera, settings, stopped_near=None, settle=1.5, moved_px
 
 def run_leg(number, camera, imu, saber, settings, calibration, output_root, leg_ft, speed_cm_s,
             record_every, execute, finish_requested, clock=time.monotonic, sleep=time.sleep, observer=None):
-    """One leg: stationary heading measurement, then drive up to `leg_ft`.
+    """One leg: stationary heading measurement, then drive up to `leg_ft` (None: no limit).
 
     Always returns with motors stopped and results saved; returns
     (reason, lane position where it stopped or None).
@@ -439,7 +443,8 @@ def run_leg(number, camera, imu, saber, settings, calibration, output_root, leg_
     output.mkdir(parents=True, exist_ok=False)
     records, recorder = [], None
     outcome = {"execute": execute, "trial": f"leg {number}", "leg": number, "leg_ft": leg_ft,
-               "nominal_time_estimate_s": round(nominal, 1), "duration_s": duration, "distance_measured": False,
+               "nominal_time_estimate_s": None if math.isinf(nominal) else round(nominal, 1),
+               "duration_s": duration, "distance_measured": False,
                "estimated_speed_cm_s": speed_cm_s, "settings": settings.__dict__, "reason": "start_failed"}
     try:
         zero, start = measure_start(camera, imu, calibration, settings, clock=clock, sleep=sleep)
@@ -450,13 +455,14 @@ def run_leg(number, camera, imu, saber, settings, calibration, output_root, leg_
             "source": "lane_center.json calibration; IMU zero from start-up image heading", **start,
         }, indent=2) + "\n")
         print(f"Leg {number}: {start['yaw_deg']:+.1f} deg from the track direction, lane offset "
-              f"{start['lateral_px']:+.0f} px. Driving up to {leg_ft:g} ft; Enter stops the leg.")
+              f"{start['lateral_px']:+.0f} px. Driving " + (f"up to {leg_ft:g} ft" if leg_ft else "with no distance limit")
+              + "; Enter stops the leg.")
         if record_every:
             from run_recording import FrameRecorder
             recorder = FrameRecorder(every=record_every)
         outcome["reason"] = control_loop(
             camera, imu, saber, reference, zero, duration, settings, records, recorder, clock, sleep,
-            finish_requested=finish_requested, max_distance_cm=leg_ft * 30.48,
+            finish_requested=finish_requested, max_distance_cm=leg_ft * 30.48 if leg_ft else None,
             speed_cm_s=speed_cm_s, calibration=calibration, observer=observer)
     except RuntimeError as exc:
         outcome["reason"] = str(exc)
@@ -504,7 +510,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true", help="enable physical motor commands")
     parser.add_argument("--leg-ft", type=positive_number, default=15.0,
-                        help="distance per leg, maximum 20 ft; default 15 (three mats)")
+                        help="distance per leg, maximum 100 ft; default 15 (three mats)")
     parser.add_argument("--legs", type=bounded_int(1, 100), help="stop after this many legs (default: until q)")
     parser.add_argument("--estimated-speed-cm-s", type=positive_number, default=14.0,
                         help="speed at command 25 for distance estimates; default 14 from course runs")
@@ -524,8 +530,8 @@ def main(argv=None):
                              "driving on IMU heading until the leg distance, Enter, or 45 deg of rotation")
     parser.add_argument("--output", type=Path, default=Path("centering_results"))
     args = parser.parse_args(argv)
-    if args.leg_ft > 20:
-        parser.error("--leg-ft must be <= 20")
+    if args.leg_ft > 100:
+        parser.error("--leg-ft must be <= 100")
     if args.speed != 25:
         parser.error("distance estimates currently support only calibrated speed command 25")
     if args.camera is not None and args.camera < 0:

@@ -47,7 +47,7 @@ def app_run(presses, frames=None, imu_values=None):
     imu = helpers.IMU(imu_values or itertools.repeat(0.0))
     with tempfile.TemporaryDirectory() as folder, contextlib.redirect_stdout(io.StringIO()):
         app = LaneApp(display, Camera(frames or [GOOD], clock), imu, motors, Settings(), load(), Path(folder),
-                      leg_ft=15, clock=clock, sleep=clock.sleep)
+                      clock=clock, sleep=clock.sleep)
         runs = app.run()
         outcomes = [json.loads((run / "outcome.json").read_text()) for run in sorted(Path(folder).glob("run_*"))]
     return runs, display, motors, outcomes, app
@@ -65,6 +65,13 @@ class LaneAppTests(unittest.TestCase):
         self.assertEqual(display.button_sets[:3], [idle, driving, idle])
         self.assertGreater(len(display.frames), 10)  # Camera view shown while idle and driving.
         self.assertIn("stopped", app.message)
+
+    def test_no_distance_limit_by_default(self):
+        # 40 s of driving (~18 ft at 14 cm/s) without reaching any distance stop.
+        runs, display, motors, outcomes, _ = app_run([(0.1, "start"), (41.0, "stop"), (41.5, "quit")])
+        self.assertEqual([o["reason"] for o in outcomes], ["finish_marker"])
+        self.assertIsNone(outcomes[0]["leg_ft"])
+        self.assertGreater(max(t for t, _, _ in motors.commands), 40)
 
     def test_quit_while_idle_never_drives(self):
         runs, display, motors, outcomes, _ = app_run([(0.5, "quit")])
