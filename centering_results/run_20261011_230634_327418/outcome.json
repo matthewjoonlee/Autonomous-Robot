@@ -1,0 +1,43 @@
+{
+  "execute": true,
+  "trial": "leg 3",
+  "leg": 3,
+  "leg_ft": 15.0,
+  "nominal_time_estimate_s": 32.7,
+  "duration_s": 65.31428571428572,
+  "distance_measured": false,
+  "estimated_speed_cm_s": 14.0,
+  "settings": {
+    "speed": 25,
+    "max_turn": 20,
+    "position_gain": 90.0,
+    "heading_gain": 3.0,
+    "max_target_heading": 12.0,
+    "abort_heading": 45.0,
+    "min_confidence": 0.35,
+    "smoothing": 0.5,
+    "rotation_error_per_deg": 0.0323,
+    "heading_correction": 0.1,
+    "turn_deadzone": 4.0,
+    "turn_rate": 40.0,
+    "turn_slowdown": 0.0,
+    "lost_limit": 3.0,
+    "prior_seconds": 0.3,
+    "max_sample_age": 0.15
+  },
+  "reason": "estimated_distance",
+  "start": {
+    "yaw_deg": 1.72,
+    "yaw_spread_deg": 0.02,
+    "lateral_px": 176.9,
+    "lane_frames": 10,
+    "frames": 10
+  },
+  "recording": {
+    "recorded_frames": 197,
+    "dropped_frames": 0,
+    "recorded_mb": 6.6,
+    "jpeg_quality": 85,
+    "record_every": 3
+  }
+}
