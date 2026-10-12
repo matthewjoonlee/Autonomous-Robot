@@ -58,4 +58,12 @@ centering_results/run_20261011_220938_068460/frames/frame_00215.jpg,0.8657,0.795
 centering_results/run_20261011_220938_068460/frames/frame_00219.jpg,,,confirmed,visually checked,"lane sliver at right image edge, no dashes (nudge, 15 ft-suite room)"
 centering_results/run_20261011_220938_068460/frames/frame_00220.jpg,,,confirmed,visually checked,"lane sliver at right image edge, no dashes (nudge, 15 ft-suite room)"
 centering_results/run_20261011_220938_068460/frames/frame_00221.jpg,,,confirmed,visually checked,"lane sliver at right image edge, no dashes (nudge, 15 ft-suite room)"
-centering_results/run_20261011_220938_068460/frames/frame_00222.jpg,,,confirmed,visually checked,"lane sliver at right image edge, no dashes (nudge, 15 ft-suite room)"
+centering_results/run_20261011_220938_068460/frames/frame_00222.jpg,1.0042,0.9192,confirmed,"lane fit, visually checked",sharply rotated; dashes visible upper right (relabeled: earlier thumbnail review missed them)
+centering_results/run_20261011_212015_704644/reference_raw.png,0.6439,0.6009,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector
+centering_results/run_20261011_212215_684522/reference_raw.png,0.6295,0.5842,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector
+centering_results/run_20261011_212513_828268/reference_raw.png,0.6289,0.5841,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector
+centering_results/run_20261011_212713_385597/reference_raw.png,0.6320,0.5822,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector
+centering_results/run_20261011_214721_248543/reference_raw.png,0.6395,0.5936,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector
+centering_results/run_20261011_214821_207942/reference_raw.png,0.6570,0.6078,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector
+centering_results/run_20261011_214940_946079/reference_raw.png,0.6531,0.6066,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector
+centering_results/run_20261011_215102_496234/reference_raw.png,0.6379,0.5918,confirmed,"lane fit, operator-centered reference",calibration image; broke under row-chaining detector

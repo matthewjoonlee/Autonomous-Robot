@@ -132,18 +132,22 @@ def detect_line(frame):
     return result
 
 
-def detect_lane(frame, prior=None, gate=0.10):
-    """Fit the centerline of the dark lane from per-row midpoints.
+def detect_lane(frame, prior=None, gate=0.10, tolerance=0.02):
+    """Fit the centerline of the dark lane from per-row lane candidates.
 
     Blur barely moves the middle of a wide dark strip, so rows that fail are
     simply skipped instead of rejecting the frame. Yellow counts as lane so the
-    dashes (smeared wide by rotation blur) do not split it. With a prior fit,
-    each row searches near the predicted center; without one, rows are followed
-    bottom-up from the widest dark run, which near the robot is the lane rather
-    than shadowed carpet patches. A run cut off by the image border (rotated
-    or displaced robot) has a biased midpoint, so those rows use the dash
-    pixels inside the run instead. Runs spanning most of the width (crossing
-    bands) are ignored.
+    dashes (smeared wide by rotation blur) do not split it. Each row offers
+    candidate centers: the midpoint of every dark run, or, for a run cut off by
+    the image border (rotated or displaced robot), the dash pixels inside it.
+    Runs spanning most of the width (crossing bands) are ignored. With a prior
+    fit, only candidates near the predicted center count.
+
+    The lane is the straight line supported by the most rows: lines through
+    pairs of candidates (one in the near half, one in the far half) are scored
+    by how many candidates lie within `tolerance` of them. A wrong row near the
+    robot, another robot down the track, a shoe, or a carpet patch supports few
+    rows and is outvoted, instead of derailing a row-by-row chain.
     """
     height, width = frame.shape[:2]
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -152,53 +156,46 @@ def detect_lane(frame, prior=None, gate=0.10):
     kernel = np.ones((1, max(3, round(width / 40))), dtype=np.uint8)
     lane = cv2.morphologyEx(lane.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
     rows = range(int(height * ROI_BOTTOM) - 1, int(height * ROI_TOP), -4)
-    points = []
-    previous = None
+    candidates = []  # (x, y, run width) in pixels
     for y in rows:
         transitions = np.diff(np.concatenate(([0], lane[y].astype(np.int8), [0])))
         starts, ends = np.flatnonzero(transitions == 1), np.flatnonzero(transitions == -1)
-        centers = []
         for a, b in zip(starts, ends):
             if not 0.05 * width < b - a < 0.7 * width:
                 continue
             if 0 < a and b < width:
-                centers.append(((a + b) / 2, b - a))
-                continue
-            dash = np.flatnonzero(yellow[y, a:b])
-            if 0 < len(dash) < 0.08 * width:
-                centers.append((a + dash.mean(), b - a))
-        if not centers:
-            continue
-        if prior is not None:
-            expected = (prior[0] * y / height + prior[1]) * width
-            allowed = gate * width
-        elif previous is not None:
-            expected, allowed = previous[0], width
-        else:
-            center = max(centers, key=lambda candidate: candidate[1])[0]
-            expected, allowed = center, 0
-        center = min((candidate[0] for candidate in centers), key=lambda value: abs(value - expected))
-        if abs(center - expected) > allowed:
-            continue
-        # Row-to-row continuity, also applied with a prior, whose wide gate admits
-        # nearby dark objects (another robot, a shoe) at the far rows. Once a few
-        # rows are found, follow the lane's own lean (~0.3 px/row) tightly so a
-        # gap cannot be bridged onto something else; before that allow ~1 px/row.
-        if previous is not None:
-            if len(points) >= 5:
-                # Median pairwise slope and median prediction: one bad row cannot skew it.
-                recent = np.array(points[-8:]) * (width, height)
-                xs, ys = recent[:, 0], recent[:, 1]
-                lean = np.median([(xs[j] - xs[i]) / (ys[j] - ys[i])
-                                  for i in range(len(xs)) for j in range(i + 1, len(xs))])
-                predicted = np.median(xs + lean * (y - ys))
-                limit = 0.02 * width + 0.15 * (previous[1] - y)
+                x = (a + b) / 2
             else:
-                predicted, limit = previous[0], 0.02 * width + (previous[1] - y)
-            if abs(center - predicted) > limit:
+                dash = np.flatnonzero(yellow[y, a:b])
+                if not 0 < len(dash) < 0.08 * width:
+                    continue
+                x = a + dash.mean()
+            if prior is not None and abs(x - (prior[0] * y / height + prior[1]) * width) > gate * width:
                 continue
-        previous = (center, y)
-        points.append((center / width, y / height))
+            candidates.append((x, y, b - a))
+    points = []
+    if candidates:
+        cand = np.array(candidates, dtype=float)
+        middle = height * (ROI_TOP + ROI_BOTTOM) / 2
+        near, far = cand[cand[:, 1] > middle], cand[cand[:, 1] <= middle]
+        if len(near) and len(far):
+            # Every near/far pair defines a line x = m*y + c; keep plausible leans.
+            dy = far[None, :, 1] - near[:, None, 1]
+            m = (far[None, :, 0] - near[:, None, 0]) / dy
+            c = near[:, None, 0] - m * near[:, None, 1]
+            plausible = np.abs(m) <= 1.5
+            close = np.abs(m[..., None] * cand[:, 1] + c[..., None] - cand[:, 0]) < tolerance * width
+            # Most supporting candidates wins; total run width breaks ties (the lane is wide).
+            score = close.sum(-1) + 1e-4 * (close * cand[:, 2]).sum(-1)
+            score[~plausible] = -1
+            i, j = np.unravel_index(np.argmax(score), score.shape)
+            if score[i, j] > 0:
+                predicted = m[i, j] * cand[:, 1] + c[i, j]
+                for y in sorted(set(cand[:, 1]), reverse=True):
+                    in_row = cand[cand[:, 1] == y]
+                    k = np.argmin(np.abs(in_row[:, 0] - (m[i, j] * y + c[i, j])))
+                    if abs(in_row[k, 0] - (m[i, j] * y + c[i, j])) < tolerance * width:
+                        points.append((in_row[k, 0] / width, y / height))
     points = np.array(points, dtype=float).reshape(-1, 2)
     result = {"status": "line_lost", "confidence": 0.0, "points": points,
               "fit": None, "inliers": np.zeros(len(points), dtype=bool)}

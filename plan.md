@@ -383,6 +383,17 @@ The exam runs all tests in one program: the robot is moved between tests and mus
 
 Each leg is saved as its own `run_*` folder (trial `leg N`), so replay, mining, and the scorecard work unchanged. To keep pushes small, every 3rd frame is recorded by default (`--record-every 3`, about 10 MB per 15 ft leg; `--record-every 1` keeps all). Replay then steps the controller only on recorded frames, so decisions approximate the live ones more loosely than with every frame. No prompts appear between legs. A 15 ft leg is about 33 s and roughly 30 MB of recorded frames. Session tests cover first placement, no restart until moved, pick-up and slide restarts, Enter/q, two legs from different starts in one session, and a lane fault that ends one leg but not the session.
 
+### First one-program session (October 11, 2026)
+
+Legs `run_20261011_222608_014418`, `222712_568548`, `222851_395272` (each started as leg 1). Operator: very happy overall; corrected successfully for the most part, a little off here and there.
+
+- Edge starts are clean: both right-edge legs went from about -180 px to within 10 px by about 117 cm (3.8 ft) with no overshoot; image heading correction held the IMU's 3-4 degree drift out. Nudges mid-leg recovered.
+- Every leg ended on a fault, and none was a control failure: leg 1 when a person's leg blocked the camera; legs 2 and 3 at the end of the track (another robot parked there). Leg 3 kept searching toward that robot for about 5 s because occasional detections of the remaining lane stub reset the 3 s limit; leg 2 searched until rotation passed 45 degrees.
+- End-of-lane stop: if the lane is seen only in the near rows (no point above image row 0.68) with no confident full-lane frame for 0.5 s, the leg ends with "End of lane ahead" (recoverable: stop, save, wait). Normal tracking reaches row 0.67 or higher in 99% of frames. Replay triggers it on all three new legs (17.0, 28.0, 25.8 s) and on none of the sixteen earlier runs, including nudges and edge starts.
+- Detector: the previous session's tight row-to-row chaining broke two of the eight centered reference images (a wrong bottom row locked out the real lane). Row chaining is replaced by a consensus line: every row offers candidate centers, lines through near/far candidate pairs are scored by how many candidates lie within 2% of the width, and the best-supported line wins (ties to wider runs). All eight references track again (0.71-0.86) and were added to the regression set (68 confirmed labels). Agreement with the dash fit improved (max 2.4 px), it runs about 1.3 ms per frame, and replay tracking improved on every run (hardest new leg 66% to 79%).
+- "A little off": the image shows a slight lens bend (near-half lane slope 0.03-0.15 below the far half), and in one stretch the image heading read about 4 degrees while the lateral estimate did not change, i.e. a few-degree heading bias worth roughly 2-3 cm. A quadratic fit did not improve physical consistency, so the straight-line fit stays. Plain straight legs without nudges would isolate this.
+- One frame previously labeled as a no-lane sliver (nudge run, frame 222) actually shows the dashes; relabeled.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
