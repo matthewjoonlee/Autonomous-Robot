@@ -1,0 +1,18 @@
+{
+  "frames": 398,
+  "distance_cm": 314.9,
+  "duration_s": 22.49,
+  "fps": 17.6,
+  "tracked_pct": 76.1,
+  "lost_episodes": 16,
+  "longest_lost_s": 1.37,
+  "search_s": 5.41,
+  "lateral_rms_px": 62.2,
+  "rms_error_px": 46.1,
+  "peak_error_px": 247.8,
+  "final_error_px": null,
+  "centered_after_s": null,
+  "turn_jitter": 0.754,
+  "turn_reversals": 4,
+  "max_heading_deg": 24.45
+}
