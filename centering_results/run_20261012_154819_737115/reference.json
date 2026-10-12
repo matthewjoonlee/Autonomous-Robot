@@ -1,0 +1,14 @@
+{
+  "fit": [
+    0.2315000000000001,
+    0.4422249999999999
+  ],
+  "width": 640,
+  "zero_heading_deg": 217.23217430813656,
+  "source": "lane_center.json calibration; IMU zero from start-up image heading",
+  "yaw_deg": -3.42,
+  "yaw_spread_deg": 0.07,
+  "lateral_px": -159.4,
+  "lane_frames": 10,
+  "frames": 10
+}
