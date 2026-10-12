@@ -364,6 +364,25 @@ The graded test does not allow capturing a centered reference first. The referen
 
 Trial prompts now describe placement only (centered, or half off at the left/right edge). The heading reference is fixed at start-up; if IMU drift becomes visible on longer runs, image heading (now well characterized) can slowly correct it. A motor-free end-to-end test runs `main` with fake camera/IMU and checks for no reference prompt and complete outputs.
 
+### Third suite: edge starts without a reference (October 11, 2026)
+
+Runs `run_20261011_220555_668493` (straight), `220712_368437` (left edge), `220819_453756` (right edge), `220938_068460` (nudge), in a different room; all four stopped at the estimated 5 ft. Start-up found the lane in 10/10 frames from both edges (+174 px and -160 px lateral), and the straight trial held within about 5 px, so the fixed `lane_center.json` calibration carried over.
+
+- Notes: left "corrected too far to the right"; right "pretty good, not enough to the right" (ended left of center); nudge "started correcting but 5 ft too short".
+- Cause of both overshoots: while held at about 12 degrees, the IMU heading drifted 2-4.5 degrees away from the image heading (left trial ended IMU 7.5 vs image 2.9). The rotation-removed lateral estimate inherited the error and still read "not there yet" at center. Image-only lateral matched the operator (left ended -40 px, right +30 px) and closed at a physically consistent ~30 px/s.
+- Fix: whenever the lane is trusted, the IMU heading is pulled toward the image heading with weight 0.1 per frame (~0.5 s; innovation clamped to 5 degrees), held while the lane is unseen (`heading_correction`, 0 disables). Replay of the edge trials then eases the target from 12 degrees starting about 4.6 s in and reaches center nearly straight, instead of holding 12 degrees until 6.6 s.
+- Detector: another robot parked down the track (and a shoe during the nudge) sat 25-45 px beside the lane at the far rows, inside the 64 px prior gate, and wrecked the fit (right trial 90% tracked). Row continuity now applies with a prior too, follows the lane's own lean once five rows are found (median pairwise slope, 0.15 px/row allowance), and the robust refit runs twice. Replay: right trial 100% tracked, nudge 95%; older frames still agree with the dash fit within 3.4 px; about 2.2 ms per frame on the Mac. Mining added 42 labels from these runs (35 confirmed, 4 edge-sliver negatives, 3 corrected where interpolation across the nudge was off by ~20 px); 60 confirmed labels pass.
+
+### One program for every test, 15 ft legs
+
+The exam runs all tests in one program: the robot is moved between tests and must know where to go. `quiz3_autonomous.py` (and `quiz3_course.py`, now an alias) runs a session:
+
+1. Wait, stopped: once the lane has been seen steadily for 1.5 s, start. After a leg, the robot must first be moved, either picked up (lane unseen 0.5 s) or slid (lane shifts more than 40 px), so it never restarts on its own where it stopped. Enter starts at once; `q` + Enter quits.
+2. Leg: hold still ~0.5 s to measure heading and offset from the image (sets the IMU zero), then drive until an estimated 15 ft (`--leg-ft`, at most 20; time fallback 2x nominal, capped at 90 s). Enter ends the leg.
+3. Lane not found for 3 s, rotation past 45 degrees, or no lane at start ends only that leg: motors stop, the leg is saved, and the robot waits to be placed again. Hardware/IMU/timing faults still end the program.
+
+Each leg is saved as its own `run_*` folder (trial `leg N`), so replay, mining, and the scorecard work unchanged. No prompts appear between legs. A 15 ft leg is about 33 s and roughly 30 MB of recorded frames. Session tests cover first placement, no restart until moved, pick-up and slide restarts, Enter/q, two legs from different starts in one session, and a lane fault that ends one leg but not the session.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.

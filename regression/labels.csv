@@ -17,3 +17,45 @@ centering_results/run_20261011_212713_385597/frames/frame_00200.jpg,0.7873,0.730
 centering_results/run_20261011_212713_385597/frames/frame_00201.jpg,0.8419,0.7631,confirmed,"lane fit, visually checked",nudge rotation; lane moving ~40 px/frame toward image edge
 centering_results/run_20261011_212713_385597/frames/frame_00202.jpg,0.9028,0.8169,confirmed,"lane fit, visually checked",nudge rotation; lane moving ~40 px/frame toward image edge
 centering_results/run_20261011_214821_207942/frames/frame_00172.jpg,0.6457,0.5991,confirmed,"interpolated (lost), visually checked",low-confidence (0.32) but correct fit; second suite left trial
+centering_results/run_20261011_220819_453756/frames/frame_00139.jpg,0.8233,0.7784,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00143.jpg,0.8208,0.7785,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00149.jpg,0.8134,0.7618,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00152.jpg,0.8098,0.7645,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00153.jpg,0.8082,0.7639,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00156.jpg,0.8028,0.7554,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00157.jpg,0.8016,0.7542,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00158.jpg,0.8005,0.7531,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00164.jpg,0.7927,0.7357,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00168.jpg,0.7845,0.7306,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00172.jpg,0.7790,0.7246,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00173.jpg,0.7780,0.7234,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00174.jpg,0.7761,0.7213,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00175.jpg,0.7750,0.7202,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00176.jpg,0.7741,0.7191,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00179.jpg,0.7699,0.7160,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00180.jpg,0.7676,0.7162,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00181.jpg,0.7664,0.7162,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00182.jpg,0.7652,0.7163,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00184.jpg,0.7607,0.7144,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00185.jpg,0.7586,0.7125,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00187.jpg,0.7541,0.7081,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00188.jpg,0.7540,0.7077,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00191.jpg,0.7515,0.6984,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220819_453756/frames/frame_00192.jpg,0.7508,0.6976,confirmed,"interpolated (lost), visually checked",visible lane; another robot parked down the track
+centering_results/run_20261011_220938_068460/frames/frame_00148.jpg,0.6280,0.5945,confirmed,"interpolated (lost), visually checked",visible lane; person near track during nudge
+centering_results/run_20261011_220938_068460/frames/frame_00149.jpg,0.6268,0.5922,confirmed,"interpolated (lost), visually checked",visible lane; person near track during nudge
+centering_results/run_20261011_220938_068460/frames/frame_00150.jpg,0.6262,0.5912,confirmed,"interpolated (lost), visually checked",visible lane; person near track during nudge
+centering_results/run_20261011_220938_068460/frames/frame_00151.jpg,0.6250,0.5889,confirmed,"interpolated (lost), visually checked",visible lane; person near track during nudge
+centering_results/run_20261011_220938_068460/frames/frame_00152.jpg,0.6244,0.5879,confirmed,"interpolated (lost), visually checked",visible lane; person near track during nudge
+centering_results/run_20261011_220938_068460/frames/frame_00156.jpg,0.6224,0.5908,confirmed,"interpolated (lost), visually checked",visible lane; person near track during nudge
+centering_results/run_20261011_220938_068460/frames/frame_00158.jpg,0.6245,0.5984,confirmed,"interpolated (lost), visually checked",visible lane; person near track during nudge
+centering_results/run_20261011_220938_068460/frames/frame_00170.jpg,0.6194,0.5849,confirmed,"interpolated (lost), visually checked",visible lane; person near track during nudge
+centering_results/run_20261011_220938_068460/frames/frame_00211.jpg,0.7103,0.6625,confirmed,"interpolated (lost), visually checked",visible lane; person near track during nudge
+centering_results/run_20261011_220938_068460/frames/frame_00212.jpg,0.7396,0.6879,confirmed,"interpolated (lost), visually checked",visible lane; person near track during nudge
+centering_results/run_20261011_220938_068460/frames/frame_00213.jpg,0.7634,0.7077,confirmed,"lane fit, visually checked",rotated during nudge; interpolated label was off by ~20 px
+centering_results/run_20261011_220938_068460/frames/frame_00214.jpg,0.7901,0.7284,confirmed,"lane fit, visually checked",rotated during nudge; interpolated label was off by ~20 px
+centering_results/run_20261011_220938_068460/frames/frame_00215.jpg,0.8657,0.7957,confirmed,"lane fit, visually checked",rotated during nudge; interpolated label was off by ~20 px
+centering_results/run_20261011_220938_068460/frames/frame_00219.jpg,,,confirmed,visually checked,"lane sliver at right image edge, no dashes (nudge, 15 ft-suite room)"
+centering_results/run_20261011_220938_068460/frames/frame_00220.jpg,,,confirmed,visually checked,"lane sliver at right image edge, no dashes (nudge, 15 ft-suite room)"
+centering_results/run_20261011_220938_068460/frames/frame_00221.jpg,,,confirmed,visually checked,"lane sliver at right image edge, no dashes (nudge, 15 ft-suite room)"
+centering_results/run_20261011_220938_068460/frames/frame_00222.jpg,,,confirmed,visually checked,"lane sliver at right image edge, no dashes (nudge, 15 ft-suite room)"

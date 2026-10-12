@@ -65,7 +65,8 @@ def replay(run, overrides=()):
         # Newer runs use the calibrated center saved in reference.json.
         saved = json.loads((run / "reference.json").read_text())
         reference = {"fit": tuple(saved["fit"]), "width": saved["width"]}
-    controller = Controller(reference, 0.0, settings)
+    from lane_center import load as load_center
+    controller = Controller(reference, 0.0, settings, load_center())
     replayed, detections = [], []
     for recorded_row in rows:
         frame_id = int(recorded_row["frame_id"])

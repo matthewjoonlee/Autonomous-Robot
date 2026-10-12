@@ -91,8 +91,9 @@ class ReplayTests(unittest.TestCase):
         sequence = [good, left, left, bad, bad, left, left, left, good, good]
         camera, imu, _, reference, clock, rows, _ = CenteringTests().setup_loop(sequence, [0] * len(sequence))
         recorder = FrameRecorder()
+        from lane_center import load
         control_loop(camera, imu, None, reference, 0, 0.04 * len(sequence) - 0.02, Settings(),
-                     rows, recorder, clock, clock.sleep)
+                     rows, recorder, clock, clock.sleep, calibration=load())
         run = Path(folder) / "run_test"
         run.mkdir()
         cv2.imwrite(str(run / "reference_raw.png"), good)

@@ -1,4 +1,5 @@
-"""Bounded straight-track centering test. Motor-free diagnostics by default."""
+"""Lane centering: one program for every test. Place the robot on the lane; it measures
+where it is and drives up to 15 ft, then waits to be moved. Motor-free unless --execute."""
 
 import argparse
 import csv
@@ -32,6 +33,9 @@ class Settings:
     smoothing: float = 0.5       # Weight of each new lane measurement; 1 disables filtering.
     # Near-row image error per degree of yaw: capture 005 moved the lane -272 px at +13.1 deg.
     rotation_error_per_deg: float = 0.0323
+    # Per-frame weight pulling the IMU heading toward the image heading (~0.5 s time
+    # constant); during edge trials the IMU drifted 2-4.5 deg from the image. 0 = IMU only.
+    heading_correction: float = 0.1
     turn_deadzone: float = 4.0   # Turn commands below ~5 barely rotate the robot (course-run data).
     turn_rate: float = 40.0      # Max change in physical turn units per second.
     turn_slowdown: float = 0.0   # Speed fraction shed at full turn; 0 until lower speeds are validated.
@@ -41,7 +45,8 @@ class Settings:
 
 
 TUNABLE = ("position_gain", "heading_gain", "max_target_heading", "min_confidence", "smoothing",
-           "rotation_error_per_deg", "turn_deadzone", "turn_rate", "turn_slowdown", "prior_seconds")
+           "rotation_error_per_deg", "heading_correction", "turn_deadzone", "turn_rate", "turn_slowdown",
+           "prior_seconds")
 
 
 def tuned(settings, overrides):
@@ -60,7 +65,7 @@ def tuned(settings, overrides):
             raise ValueError(f"--set {key} must be a nonnegative number")
         changes[key] = value
     result = replace(settings, **changes)
-    if not (0 < result.smoothing <= 1 and 0 <= result.turn_slowdown < 1
+    if not (0 < result.smoothing <= 1 and 0 <= result.turn_slowdown < 1 and result.heading_correction <= 1
             and 0 < result.min_confidence <= 1 and result.max_target_heading < result.abort_heading
             and result.turn_deadzone < result.max_turn and result.turn_rate > 0):
         raise ValueError("--set values out of range (check smoothing, max_target_heading, turn_deadzone)")
@@ -157,10 +162,13 @@ class LaneTracker:
         slope, intercept = self.fit
         return slope, intercept - self.settings.rotation_error_per_deg * (heading - self.seen_heading)
 
+    def trusted(self, detection, error):
+        return (detection["status"] == "tracked" and detection["confidence"] >= self.settings.min_confidence
+                and error is not None and math.isfinite(error))
+
     def update(self, detection, error, heading, now):
         settings = self.settings
-        if (detection["status"] == "tracked" and detection["confidence"] >= settings.min_confidence
-                and error is not None and math.isfinite(error)):
+        if self.trusted(detection, error):
             measured = error + settings.rotation_error_per_deg * heading
             self.lateral += settings.smoothing * (measured - self.lateral)
             self.fit, self.seen, self.seen_heading = detection["fit"], now, heading
@@ -176,26 +184,39 @@ class Controller:
     a replay of recorded frames makes exactly the decisions the robot made.
     """
 
-    def __init__(self, reference, now, settings):
-        self.reference, self.settings = reference, settings
+    def __init__(self, reference, now, settings, calibration=None):
+        self.reference, self.settings, self.calibration = reference, settings, calibration
         self.tracker = LaneTracker(reference, now, settings)
         self.turn = 0.0
         self.last = now
+        # Correction added to the IMU heading so it follows the image heading
+        # (lane_center calibration) whenever the lane is seen; held while unseen.
+        self.heading_bias = 0.0
 
-    def observe(self, frame, heading, capture_time):
+    def observe(self, frame, imu_heading, capture_time):
         from track_vision import detect_lane, summarize
+        heading = imu_heading + self.heading_bias
         detection = detect_lane(frame, self.tracker.prior(capture_time, heading))
-        return detection, summarize(detection, self.reference, heading)
+        return detection, summarize(detection, self.reference, imu_heading)
 
-    def decide(self, detection, summary, heading, now, row):
+    def decide(self, detection, summary, imu_heading, now, row):
         """Fill `row` with the decision; faults raise after naming the state."""
-        tracker = self.tracker
-        seen = tracker.update(detection, summary["near_error_normalized"], heading, now)
+        tracker, settings = self.tracker, self.settings
+        error = summary["near_error_normalized"]
+        if self.calibration is not None and settings.heading_correction and tracker.trusted(detection, error):
+            from lane_center import image_yaw
+            yaw = image_yaw(detection["fit"], self.calibration, settings.rotation_error_per_deg)
+            innovation = clamp(yaw - (imu_heading + self.heading_bias), 5.0)  # Limit one bad fit.
+            self.heading_bias += settings.heading_correction * innovation
+            row["image_yaw_deg"] = round(yaw, 2)
+        heading = imu_heading + self.heading_bias
+        seen = tracker.update(detection, error, heading, now)
         lost_for = now - tracker.seen
-        row.update(lateral_error=round(tracker.lateral, 5), lost_s=round(lost_for, 3))
+        row.update(heading_deg=round(heading, 2), lateral_error=round(tracker.lateral, 5),
+                   lost_s=round(lost_for, 3))
         try:
             command = choose_command(tracker.lateral, heading, lost_for, self.turn, now - self.last,
-                                     self.settings)
+                                     settings)
         except RuntimeError as exc:
             row["state"] = str(exc)
             raise
@@ -208,6 +229,7 @@ class Controller:
 def new_row(elapsed, frame_id, processing, summary):
     return {"elapsed_s": round(elapsed, 4), "frame_id": frame_id,
             "processing_s": round(processing, 4), **summary,
+            "image_yaw_deg": None, "heading_deg": None,
             "lateral_error": None, "lost_s": None, "distance_cm": None,
             "speed": 0, "raw_turn": 0, "physical_turn": 0, "turn": 0.0,
             "target_heading_deg": None, "state": "checking"}
@@ -215,7 +237,7 @@ def new_row(elapsed, frame_id, processing, summary):
 
 def control_loop(camera, imu, saber, reference, zero, duration, settings, records, recorder=None,
                  clock=time.monotonic, sleep=time.sleep, finish_requested=None,
-                 max_distance_cm=None, speed_cm_s=14.0):
+                 max_distance_cm=None, speed_cm_s=14.0, calibration=None):
     """Track the lane; search for it on IMU heading when unseen; stop on faults.
 
     No disk writes or console printing while motors are being commanded. Keep
@@ -233,7 +255,7 @@ def control_loop(camera, imu, saber, reference, zero, duration, settings, record
     distance = 0.0
     last_speed = 0
     previous = 0.0  # Decision times since start; the gap between them includes motor I/O.
-    controller = Controller(reference, 0.0, settings)  # Times are seconds since start.
+    controller = Controller(reference, 0.0, settings, calibration)  # Times are seconds since start.
     try:
         while clock() < deadline:
             if finish_requested is not None and finish_requested():
@@ -331,29 +353,154 @@ def save_results(output, records, recorder, outcome):
     return metrics
 
 
-def finish_entered():
-    """Nonblocking terminal stop at the marked finish; EOF also stops safely."""
+def read_command():
+    """Nonblocking terminal line: None if nothing typed. EOF stops safely."""
     if select.select([sys.stdin], [], [], 0)[0]:
-        if not sys.stdin.readline():
+        line = sys.stdin.readline()
+        if not line:
             raise RuntimeError("Remote input closed; run stopped")
-        return True
-    return False
+        return line.strip().lower()
+    return None
 
 
-def course_timing(distance_ft, estimated_speed_cm_s):
-    nominal = distance_ft * 30.48 / estimated_speed_cm_s
-    # The run stops at the estimated distance or the operator's Enter; this is
+def leg_timing(leg_ft, estimated_speed_cm_s):
+    nominal = leg_ft * 30.48 / estimated_speed_cm_s
+    # A leg stops at the estimated distance or the operator's Enter; this is
     # only a bounded time fallback if the estimate is badly wrong.
-    return nominal, min(30.0, nominal * 2.0)
+    return nominal, min(90.0, nominal * 2.0)
+
+
+# Faults that end one leg but not the session: the robot stops and waits to be placed.
+RECOVERABLE = ("Lane not found", "Heading exceeded", "Lane not visible at start")
+
+
+def wait_for_placement(camera, settings, stopped_near=None, settle=1.5, moved_px=40, steady_px=10,
+                       commands=None, clock=time.monotonic, sleep=time.sleep, notify=print):
+    """Stopped: return "go" once the robot sits on the lane, "quit" on q.
+
+    After a leg (`stopped_near` = lane position where it stopped) the robot
+    must first be moved: picked up (lane unseen for 0.5 s) or slid (lane
+    shifts more than `moved_px`). It then goes once the lane has been seen
+    steadily for `settle` seconds, so hands are clear. Enter starts sooner.
+    """
+    import cv2
+    from track_vision import NEAR_Y, detect_lane
+
+    commands = commands or read_command
+    moved = stopped_near is None
+    unseen_since = steady_since = steady_near = None
+    announced = False
+    while True:
+        command = commands()
+        if command == "q":
+            return "quit"
+        frame = cv2.cvtColor(camera.capture_array(), cv2.COLOR_BGRA2BGR)
+        detection = detect_lane(frame)
+        now = clock()
+        if detection["status"] == "tracked" and detection["confidence"] >= settings.min_confidence:
+            near = (detection["fit"][0] * NEAR_Y + detection["fit"][1]) * frame.shape[1]
+            unseen_since = None
+            if stopped_near is not None and abs(near - stopped_near) > moved_px:
+                moved = True
+            if steady_near is None or abs(near - steady_near) > steady_px:
+                steady_near, steady_since = near, now
+            if command == "" or (moved and now - steady_since >= settle):
+                return "go"
+            if moved and not announced:
+                notify(f"Lane found; starting in {settle:g} s unless moved...")
+                announced = True
+        else:
+            steady_near = steady_since = None
+            announced = False
+            unseen_since = now if unseen_since is None else unseen_since
+            if now - unseen_since >= 0.5:
+                moved = True
+        sleep(0.04)
+
+
+def run_leg(number, camera, imu, saber, settings, calibration, output_root, leg_ft, speed_cm_s,
+            record_every, execute, commands, clock=time.monotonic, sleep=time.sleep):
+    """One leg: stationary heading measurement, then drive up to `leg_ft`.
+
+    Always returns with motors stopped and results saved; returns
+    (reason, lane position where it stopped or None).
+    """
+    from lane_center import reference as center_reference
+    from run_metrics import describe
+    from track_vision import NEAR_Y, save_frame
+
+    reference = center_reference(calibration)
+    nominal, duration = leg_timing(leg_ft, speed_cm_s)
+    output = output_root / datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
+    output.mkdir(parents=True, exist_ok=False)
+    records, recorder = [], None
+    outcome = {"execute": execute, "trial": f"leg {number}", "leg": number, "leg_ft": leg_ft,
+               "nominal_time_estimate_s": round(nominal, 1), "duration_s": duration, "distance_measured": False,
+               "estimated_speed_cm_s": speed_cm_s, "settings": settings.__dict__, "reason": "start_failed"}
+    try:
+        zero, start = measure_start(camera, imu, calibration, settings, clock=clock, sleep=sleep)
+        save_frame(output / "start_raw.png", start.pop("frame"))
+        outcome["start"] = start
+        (output / "reference.json").write_text(json.dumps({
+            "fit": reference["fit"], "width": reference["width"], "zero_heading_deg": zero,
+            "source": "lane_center.json calibration; IMU zero from start-up image heading", **start,
+        }, indent=2) + "\n")
+        print(f"Leg {number}: {start['yaw_deg']:+.1f} deg from the track direction, lane offset "
+              f"{start['lateral_px']:+.0f} px. Driving up to {leg_ft:g} ft; Enter stops the leg.")
+        if record_every:
+            from run_recording import FrameRecorder
+            recorder = FrameRecorder(every=record_every)
+        outcome["reason"] = control_loop(
+            camera, imu, saber, reference, zero, duration, settings, records, recorder, clock, sleep,
+            finish_requested=lambda: commands() is not None, max_distance_cm=leg_ft * 30.48,
+            speed_cm_s=speed_cm_s, calibration=calibration)
+    except RuntimeError as exc:
+        outcome["reason"] = str(exc)
+        if not str(exc).startswith(RECOVERABLE):
+            raise
+    finally:
+        if saber is not None:
+            saber.stop()
+        metrics = save_results(output, records, recorder, outcome)
+        print(f"Leg {number} ended: {outcome['reason']}. Saved {output}")
+        print("  Score:", describe(metrics))
+    last = next((row for row in reversed(records) if row.get("near_error_normalized") is not None), None)
+    stopped_near = None
+    if last is not None:
+        slope, intercept = reference["fit"]
+        stopped_near = (slope * NEAR_Y + intercept + last["near_error_normalized"]) * reference["width"]
+    return outcome["reason"], stopped_near
+
+
+def run_session(camera, imu, saber, settings, calibration, output_root, leg_ft=15.0, speed_cm_s=14.0,
+                record_every=1, execute=False, max_legs=None, commands=None,
+                clock=time.monotonic, sleep=time.sleep):
+    """One program for every test: wait to be placed, drive a leg, stop, repeat.
+
+    Place the robot anywhere on the lane (centered, half off at an edge, ...);
+    it measures where it is and drives. After each leg it stops and waits to be
+    picked up or slid to a new start. `q` + Enter (or Ctrl+C) quits.
+    """
+    commands = commands or read_command
+    legs = 0
+    stopped_near = None
+    while max_legs is None or legs < max_legs:
+        print("Waiting: place the robot on the lane (q + Enter quits, Enter starts now).")
+        if wait_for_placement(camera, settings, stopped_near, commands=commands, clock=clock,
+                              sleep=sleep) == "quit":
+            break
+        legs += 1
+        _, stopped_near = run_leg(legs, camera, imu, saber, settings, calibration, output_root, leg_ft,
+                                  speed_cm_s, record_every, execute, commands, clock, sleep)
+    return legs
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true", help="enable physical motor commands")
-    parser.add_argument("--duration", type=positive_number, help="seconds, maximum 10; default 3")
-    parser.add_argument("--trial", choices=["straight", "left", "right", "nudge"], default="straight")
-    parser.add_argument("--distance-ft", type=positive_number,
-                        help="course length, maximum 5 ft (one mat); stops at the estimated distance")
+    parser.add_argument("--leg-ft", type=positive_number, default=15.0,
+                        help="distance per leg, maximum 20 ft; default 15 (three mats)")
+    parser.add_argument("--legs", type=bounded_int(1, 100), help="stop after this many legs (default: until q)")
     parser.add_argument("--estimated-speed-cm-s", type=positive_number, default=14.0,
                         help="speed at command 25 for distance estimates; default 14 from course runs")
     parser.add_argument("--speed", type=bounded_int(1, 25), default=25)
@@ -368,17 +515,10 @@ def main(argv=None):
                         help=f"tuning override, e.g. --set position_gain=30 turn_rate=30; keys: {', '.join(TUNABLE)}")
     parser.add_argument("--output", type=Path, default=Path("centering_results"))
     args = parser.parse_args(argv)
-    if args.duration is not None and args.duration > 10:
-        parser.error("--duration must be <= 10 seconds for initial testing")
-    nominal = None
-    if args.distance_ft is not None:
-        if args.distance_ft > 5 or args.duration is not None:
-            parser.error("--distance-ft must be <= 5 and cannot be combined with --duration")
-        if args.speed != 25:
-            parser.error("course timing currently supports only calibrated speed command 25")
-        nominal, args.duration = course_timing(args.distance_ft, args.estimated_speed_cm_s)
-    else:
-        args.duration = args.duration or 3.0
+    if args.leg_ft > 20:
+        parser.error("--leg-ft must be <= 20")
+    if args.speed != 25:
+        parser.error("distance estimates currently support only calibrated speed command 25")
     if args.camera is not None and args.camera < 0:
         parser.error("--camera must be nonnegative")
     try:
@@ -387,13 +527,6 @@ def main(argv=None):
         parser.error(str(exc))
     camera = imu = saber = None
     started = False
-    output = None
-    records, recorder = [], None
-    outcome = {"execute": args.execute, "duration_s": args.duration,
-               "trial": args.trial, "requested_distance_ft": args.distance_ft,
-               "nominal_time_estimate_s": nominal, "distance_measured": False,
-               "estimated_speed_cm_s": args.estimated_speed_cm_s if nominal is not None else None,
-               "settings": settings.__dict__, "reason": "initialization_failed"}
     handlers = {}
 
     def terminate(_signal, _frame):
@@ -402,11 +535,9 @@ def main(argv=None):
     for signum in (signal.SIGTERM, signal.SIGHUP):
         handlers[signum] = signal.signal(signum, terminate)
     try:
-        import cv2
         from picamera2 import Picamera2
         from imu_controller import IMUDevice
-        from lane_center import load as load_center, reference as center_reference
-        from track_vision import save_frame
+        from lane_center import load as load_center
 
         infos = Picamera2.global_camera_info()
         for index, info in enumerate(infos):
@@ -421,8 +552,8 @@ def main(argv=None):
         metadata = camera.capture_metadata()
         if "ColourGains" in metadata:
             camera.set_controls({"AwbEnable": False, "ColourGains": metadata["ColourGains"]})
-        outcome["camera_exposure"] = configure_motion_exposure(camera, args.exposure_us)
-        print("Camera exposure:", json.dumps(outcome["camera_exposure"], default=str))
+        exposure = configure_motion_exposure(camera, args.exposure_us)
+        print("Camera exposure:", json.dumps(exposure, default=str))
         if args.execute:
             from sabertooth import Sabertooth
             saber = Sabertooth()
@@ -431,63 +562,21 @@ def main(argv=None):
             saber.stop()
             saber.set_auto_stop(200)
             saber.set_ramping(8)
-        print(f"{'POWERED' if args.execute else 'MOTOR-FREE'} bounded run: {args.duration}s.")
+        nominal, _ = leg_timing(args.leg_ft, args.estimated_speed_cm_s)
+        print(f"{'POWERED' if args.execute else 'MOTOR-FREE'} session: legs of up to {args.leg_ft:g} ft "
+              f"(~{nominal:.0f} s, estimated from speed).")
         print("Stop other control programs. Keep a physical stop accessible; Ctrl+C stops.")
-        if nominal is not None:
-            print(f"Mark start/finish {args.distance_ft:g} ft apart. Nominal time ~{nominal:.1f}s.")
-            print(f"Stops automatically at an estimated {args.distance_ft:g} ft (from speed, not measured);")
-            print(f"press Enter at the finish to stop sooner. Time fallback {args.duration:.1f}s.")
         print("Remote disconnect is not a guaranteed stop; hardware timeout is not yet verified.")
-        calibration = load_center()
-        reference = center_reference(calibration)
-        instructions = {
-            "straight": "Place the robot centered, pointing along the track. No pushes during this trial.",
-            "left": "Place the robot at the LEFT edge, half off the road, pointing along the track.",
-            "right": "Place the robot at the RIGHT edge, half off the road, pointing along the track.",
-            "nudge": "Place the robot centered. After it starts moving, give one sideways nudge.",
-        }
-        print(instructions[args.trial])
-        print("No reference capture: after RUN it holds still ~0.5 s to find the lane and its heading.")
-        if args.trial != "straight":
-            print("Recovery is under test. If the lane leaves view, the robot keeps driving and steers back")
-            print(f"toward it on IMU heading; {settings.lost_limit:g}s without the lane or "
-                  f"{settings.abort_heading:g} deg of rotation ends the run.")
-        answer = input("Type RUN to begin the bounded test (anything else cancels): ")
-        if answer.strip() != "RUN":
-            outcome["reason"] = "cancelled"
-            return 2
-        output = args.output / datetime.now().strftime("run_%Y%m%d_%H%M%S_%f")
-        output.mkdir(parents=True, exist_ok=False)
-        zero, start = measure_start(camera, imu, calibration, settings)
-        save_frame(output / "start_raw.png", start.pop("frame"))
-        outcome["start"] = start
-        (output / "reference.json").write_text(json.dumps({
-            "fit": reference["fit"], "width": reference["width"], "zero_heading_deg": zero,
-            "source": "lane_center.json calibration; IMU zero from start-up image heading", **start,
-        }, indent=2) + "\n")
-        print(f"Results: {output}")
-        print(f"Start: {start['yaw_deg']:+.1f} deg from the track direction, lane offset "
-              f"{start['lateral_px']:+.0f} px ({start['lane_frames']}/{start['frames']} frames saw the lane).")
-        if args.record_every:
-            from run_recording import FrameRecorder
-            recorder = FrameRecorder(every=args.record_every)
-        reason = control_loop(camera, imu, saber, reference, zero, args.duration, settings, records, recorder,
-                              finish_requested=finish_entered if nominal is not None else None,
-                              max_distance_cm=args.distance_ft * 30.48 if nominal is not None else None,
-                              speed_cm_s=args.estimated_speed_cm_s)
-        outcome["reason"] = reason
-        if nominal is not None and reason == "duration_complete":
-            print("Fallback time limit reached. Five-foot completion is unconfirmed.")
-        print("Run finished; motors stopped." if args.execute else "Motor-free run finished.")
-        note = input("Movement/stopping observations (Enter to skip): ")
-        (output / "operator_note.txt").write_text(note + "\n")
+        print(f"Each leg: it holds still ~0.5 s to find the lane and its heading, then drives. Lane unseen for "
+              f"{settings.lost_limit:g} s or {settings.abort_heading:g} deg of rotation ends the leg.")
+        legs = run_session(camera, imu, saber, settings, load_center(), args.output, args.leg_ft,
+                           args.estimated_speed_cm_s, args.record_every, args.execute, args.legs)
+        print(f"Session finished after {legs} leg(s); motors stopped.")
     except (KeyboardInterrupt, EOFError):
-        outcome["reason"] = "interrupted"
         print("\nInterrupted; stop requested.")
         return 2
     except Exception as exc:
-        outcome["reason"] = str(exc)
-        print(f"Centering test stopped: {exc}", file=sys.stderr)
+        print(f"Centering session stopped: {exc}", file=sys.stderr)
         return 1
     finally:
         # Stop first; never delay motor stopping for image encoding/disk writes.
@@ -500,14 +589,6 @@ def main(argv=None):
                 action()
             except Exception as exc:
                 print(f"Cleanup warning: {exc}", file=sys.stderr)
-        if output is not None:
-            try:
-                from run_metrics import describe
-                metrics = save_results(output, records, recorder, outcome)
-                print(f"Saved results: {output}")
-                print("Run score:", describe(metrics))
-            except Exception as exc:
-                print(f"Could not save all results: {exc}", file=sys.stderr)
         for signum, handler in handlers.items():
             signal.signal(signum, handler)
     return 0

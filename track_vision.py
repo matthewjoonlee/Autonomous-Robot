@@ -173,15 +173,30 @@ def detect_lane(frame, prior=None, gate=0.10):
             expected = (prior[0] * y / height + prior[1]) * width
             allowed = gate * width
         elif previous is not None:
-            # Row-to-row: the lane drifts at most ~1 px sideways per row.
-            expected = previous[0]
-            allowed = 0.02 * width + (previous[1] - y)
+            expected, allowed = previous[0], width
         else:
             center = max(centers, key=lambda candidate: candidate[1])[0]
             expected, allowed = center, 0
         center = min((candidate[0] for candidate in centers), key=lambda value: abs(value - expected))
         if abs(center - expected) > allowed:
             continue
+        # Row-to-row continuity, also applied with a prior, whose wide gate admits
+        # nearby dark objects (another robot, a shoe) at the far rows. Once a few
+        # rows are found, follow the lane's own lean (~0.3 px/row) tightly so a
+        # gap cannot be bridged onto something else; before that allow ~1 px/row.
+        if previous is not None:
+            if len(points) >= 5:
+                # Median pairwise slope and median prediction: one bad row cannot skew it.
+                recent = np.array(points[-8:]) * (width, height)
+                xs, ys = recent[:, 0], recent[:, 1]
+                lean = np.median([(xs[j] - xs[i]) / (ys[j] - ys[i])
+                                  for i in range(len(xs)) for j in range(i + 1, len(xs))])
+                predicted = np.median(xs + lean * (y - ys))
+                limit = 0.02 * width + 0.15 * (previous[1] - y)
+            else:
+                predicted, limit = previous[0], 0.02 * width + (previous[1] - y)
+            if abs(center - predicted) > limit:
+                continue
         previous = (center, y)
         points.append((center / width, y / height))
     points = np.array(points, dtype=float).reshape(-1, 2)
@@ -189,11 +204,13 @@ def detect_lane(frame, prior=None, gate=0.10):
               "fit": None, "inliers": np.zeros(len(points), dtype=bool)}
     if len(points) < 6:
         return result
-    slope, intercept = np.polyfit(points[:, 1], points[:, 0], 1)
-    residuals = np.abs(points[:, 0] - (slope * points[:, 1] + intercept))
-    inliers = residuals < max(0.012, 3 * np.median(residuals))
-    if inliers.sum() < 6:
-        return result
+    inliers = np.ones(len(points), dtype=bool)
+    for _ in range(2):  # Refit twice so a cluster of outliers cannot hold the first fit.
+        slope, intercept = np.polyfit(points[inliers, 1], points[inliers, 0], 1)
+        residuals = np.abs(points[:, 0] - (slope * points[:, 1] + intercept))
+        inliers = residuals < max(0.012, 3 * np.median(residuals[inliers]))
+        if inliers.sum() < 6:
+            return result
     selected = points[inliers]
     slope, intercept = np.polyfit(selected[:, 1], selected[:, 0], 1)
     residual = float(np.sqrt(np.mean((selected[:, 0] - (slope * selected[:, 1] + intercept)) ** 2)))

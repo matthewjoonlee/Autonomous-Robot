@@ -223,6 +223,24 @@ class CenteringTests(unittest.TestCase):
                 self.assertLess(abs(start["lateral_px"]), 10)
                 self.assertEqual(start["lane_frames"], 10)
 
+    def test_heading_follows_image_when_imu_drifts(self):
+        from lane_center import load
+        good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
+        # IMU heading jumps 5 deg wrong (real drift was ~0.5 deg/s); the camera sees it straight.
+        drift = [0.0] * 5 + [5.0] * 36
+        camera, imu, motors, reference, clock, rows, frames = self.setup_loop([good] * 41, drift)
+        control_loop(camera, imu, None, reference, 0, 0.04 * 41 - 0.02, Settings(), rows, frames,
+                     clock, clock.sleep, calibration=load())
+        last = rows[-1]
+        self.assertEqual(float(last["imu_delta_deg"]), 5.0)
+        self.assertAlmostEqual(last["heading_deg"], last["image_yaw_deg"], delta=1.0)
+        self.assertLess(abs(last["lateral_error"] * 640), 15)  # Drift is not mistaken for offset.
+        # Without the calibration the controller trusts the drifting IMU.
+        camera, imu, motors, reference, clock, rows, frames = self.setup_loop([good] * 41, drift)
+        control_loop(camera, imu, None, reference, 0, 0.04 * 41 - 0.02, Settings(), rows, frames,
+                     clock, clock.sleep)
+        self.assertEqual(rows[-1]["heading_deg"], 5.0)
+
     def test_start_up_refuses_without_lane(self):
         from lane_center import load
         good = read_image(DEFAULT_SESSION / "001_centered_straight.jpg")
@@ -391,22 +409,21 @@ class MainFlowTests(unittest.TestCase):
         imu_module = types.ModuleType("imu_controller")
         imu_module.IMUDevice = FakeIMU
         prompts = []
-        answers = itertools.chain(["RUN"], itertools.repeat(""))
         with tempfile.TemporaryDirectory() as folder:
             with patch.dict(sys.modules, {"picamera2": camera_module, "imu_controller": imu_module}), \
-                    patch("builtins.input", side_effect=lambda prompt="": prompts.append(prompt) or next(answers)), \
+                    patch("builtins.input", side_effect=lambda prompt="": prompts.append(prompt) or ""), \
+                    patch("quiz3_autonomous.read_command", return_value=None), \
                     patch("builtins.print"), patch("quiz3_autonomous.time.sleep"):
-                result = main(["--trial", "left", "--duration", "0.3", "--exposure-us", "0",
-                               "--output", folder])
+                result = main(["--legs", "1", "--leg-ft", "0.25", "--exposure-us", "0", "--output", folder])
             run = next(Path(folder).glob("run_*"))
             saved = json.loads((run / "reference.json").read_text())
             outcome = json.loads((run / "outcome.json").read_text())
             names = {path.name for path in run.iterdir()}
         self.assertEqual(result, 0)
-        self.assertEqual(len(prompts), 2)  # RUN and the operator note; no reference prompt.
+        self.assertEqual(prompts, [])  # No reference capture and no per-trial prompts.
         self.assertNotIn("reference_raw.png", names)
         self.assertTrue({"start_raw.png", "readings.csv", "metrics.json", "frames"} <= names)
-        self.assertEqual(outcome["reason"], "duration_complete")
+        self.assertEqual((outcome["reason"], outcome["leg"]), ("estimated_distance", 1))
         self.assertGreater(outcome["start"]["lateral_px"], 30)  # Placed left of center.
         self.assertAlmostEqual(saved["zero_heading_deg"], (200.0 - saved["yaw_deg"]) % 360, delta=0.01)
 
