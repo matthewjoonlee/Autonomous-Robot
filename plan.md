@@ -416,6 +416,15 @@ Five legs (`run_20261011_2255*`-`2257*`, motors enabled) logged up to 23 s of "d
 
 `lane_app.py` is the simple touchscreen program, by request: the screen shows the camera with the detected lane (green) and calibrated center (cyan). START measures position (~0.5 s still), then centers on the lane and drives straight until STOP, the leg distance (15 ft), or a fault; it then waits for the next START. QUIT exits. There is no automatic start on placement. While driving, if the commanded robot shows no image or heading change for 2 s, the screen shows "NOT MOVING - check motor power / battery". Runs save like legs (replay and metrics unchanged). `quiz3_autonomous.py` keeps the terminal session mode. Tests drive START/STOP/QUIT with a fake screen, a no-lane start, the no-motion warning, and `main` with fake hardware.
 
+### First touchscreen-app session (October 11, 2026, motors working)
+
+Legs `run_20261011_230521_064421` (center), `230602_508233`, `230634_327418`, `230726_473761` (left edge, +177 to +201 px). Operator: worked really well. (`230315_491877` earlier shows the not-moving signature: before the motor fix.)
+
+- Center start: nudges at ~3 ft and ~8.5 ft recovered; full 15 ft, finished centered.
+- Left-edge starts: within 15 px of center at 3.6 ft (from +177 px) and 5.7-5.8 ft (from about +190-200 px), about 3 cm off at 4.6-4.8 ft; the 5 ft requirement is met only for the smaller offset. The slow part is the final proportional approach.
+- Legs 2 and 4 stopped "Lane not found" at about 10-11 ft because the mats ended (floor and a chair ahead), not a fault; they started farther down the track than legs 1 and 3.
+- Model check with the measured steering response: position gain 110 or 130 reaches center about 0.3-0.5 ft sooner (model, optimistic by ~1.35x versus these runs) with somewhat more small corrections. Not made default; try `--set position_gain=110` on edge starts and compare scores.
+
 Control behavior:
 
 1. Start stopped. Require fresh, confident camera estimates and usable IMU data before enabling motion. Zero the IMU while aligned straight.
