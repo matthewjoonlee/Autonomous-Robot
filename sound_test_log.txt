@@ -1,0 +1,27 @@
+== Audio setup ==
+pygame 2.1.2 (SDL 2.26.5, Python 3.11.2)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+pygame 2.1.2 with audio mixer: OK
+pydub: OK
+text2wave (Festival speech): /usr/bin/text2wave
+Playback devices (aplay -l):
+  card 0: vc4hdmi0 [vc4-hdmi-0], device 0: MAI PCM i2s-hifi-0 [MAI PCM i2s-hifi-0]
+  card 1: vc4hdmi1 [vc4-hdmi-1], device 0: MAI PCM i2s-hifi-0 [MAI PCM i2s-hifi-0]
+  card 3: Device [Plugable USB Audio Device], device 0: USB Audio [USB Audio]
+Default output (PipeWire/PulseAudio): alsa_output.usb-Plugable_Plugable_USB_Audio_Device_000000000000-00.analog-stereo
+  Mute: no
+  Volume: front-left: 26214 /  40% / -23.88 dB,   front-right: 26214 /  40% / -23.88 dB
+USB card 3 mixer: some controls MUTED, levels 2-100%
+
+== Sound test ==
+Audio output opened: 44100 Hz, 2 channels
+Speaking: "Hello! My sound system is working."
+USB_SoundController closed gracefully.
+
+== Result ==
+  OK   audio device opened
+  OK   speech played
+  OK   speech audio generated
+Problems found:
+  - USB card 3 has a muted control: alsamixer -c 3 (press M to unmute)
+Software played audio. If you heard nothing: check the speaker is powered/switched on, its volume knob, the cable into the USB adapter, and try --use-usb.
