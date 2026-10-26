@@ -475,6 +475,20 @@ Stop and lifecycle behavior:
 
 Log timestamps, frame age, perception confidence, lateral/alignment errors, IMU heading, desired heading, speed/turn commands, operating state, and stop reason. Save selected frames around disturbances for diagnosis.
 
+## Sound system bring-up (October 26, 2026)
+
+Goal: make the robot speak "Hello! My sound system is working." through `USB_SoundController` (`usb_sound_controller.py`), without running motor or driving code.
+
+- `sound_test.py` is a standalone test. It checks pygame audio, pydub, Festival's `text2wave`, USB card detection (`aplay -l`), the default output (PipeWire/PulseAudio), and mute/volume per USB mixer control. It then queues speech, waits for the queue and for playback to finish, plays a fallback beep if needed (`--beep`), and closes the controller. `--use-usb` routes the program's audio straight to the USB card through ALSA. Logs: `sound_test_log.txt`, `sound_test_usb_log.txt`, `sound_test_log2.txt`.
+- Pi setup found: Python 3.11.2, pygame 2.1.2 with audio, pydub OK, `/usr/bin/text2wave`, Plugable USB Audio Device as ALSA card 3, and the default PipeWire output already set to it. (On Python 3.13+ pydub needs `pip install audioop-lts`; the test checks for this.)
+- First runs: software reported speech and beep played, but nothing was heard. System volume was 40%. Raised it and the adapter's Speaker control to 100% and unmuted: `amixer -c 3 sset Speaker 100% unmute`, `pactl set-sink-mute @DEFAULT_SINK@ 0`, `pactl set-sink-volume @DEFAULT_SINK@ 100%`. Still silent, and `speaker-test -D plughw:3,0` was also silent, which pointed to hardware.
+- **Root cause: the speaker was plugged into the adapter's microphone (pink) jack instead of the headphone/speaker (green) jack.** Moving it to the headphone jack fixed it; the robot spoke.
+
+Lessons:
+1. When every software layer reports playback without errors but nothing is heard, test the lowest layer directly (`speaker-test -D plughw:<card>,0 -c 2 -t sine`). Silence there means hardware: jack, cable, power, or the speaker itself.
+2. On USB audio adapters, check the jack first: green/headphone icon for output, pink/mic icon for input.
+3. The USB card number (3 here) can change after a reboot or a different USB port; `aplay -l` shows the current one.
+
 ## Phase 5: recovery testing and tuning
 
 Test in this order at low speed, with space to recover and an operator ready to stop. Begin with small offsets, then include wheels crossing onto the permitted green surface. Set recovery limits from available surface, obstacles, and reliable line visibility rather than the black-track width alone.
