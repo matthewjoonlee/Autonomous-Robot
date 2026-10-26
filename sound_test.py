@@ -107,14 +107,22 @@ def diagnose():
         mixer = run(["amixer", "-c", str(card), "scontents"])
         if mixer is None:
             break
-        muted = "[off]" in mixer[1]
-        levels = [int(v) for v in re.findall(r"\[(\d+)%\]", mixer[1])]
-        print(f"USB card {card} mixer: {'some controls MUTED' if muted else 'not muted'}"
-              + (f", levels {min(levels)}-{max(levels)}%" if levels else ""))
-        if muted:
-            problems.append(f"USB card {card} has a muted control: alsamixer -c {card} (press M to unmute)")
-        if levels and max(levels) < 30:
-            problems.append(f"USB card {card} volume is low: amixer -c {card} sset PCM 80%")
+        print(f"USB card {card} mixer controls:")
+        for control, body in re.findall(r"Simple mixer control '([^']+)',\d+\n((?:  .*\n?)*)", mixer[1]):
+            # Mic/capture controls (including mic monitoring) do not affect the speaker.
+            playback = ("pvolume" in body or "pswitch" in body) and "cvolume" not in body \
+                and "cswitch" not in body and "mic" not in control.lower()
+            levels = [int(v) for v in re.findall(r"Playback.*?\[(\d+)%\]", body)] if playback else []
+            muted = playback and bool(re.search(r"Playback.*\[off\]", body))
+            kind = "playback" if playback else "capture/other (not used for speaker)"
+            print(f"  '{control}' ({kind})" + (f": {min(levels)}-{max(levels)}%" if levels else "")
+                  + (" MUTED" if muted else ""))
+            if muted:
+                problems.append(f"USB card {card} playback control '{control}' is muted: "
+                                f"amixer -c {card} sset '{control}' unmute")
+            if levels and max(levels) < 50:
+                problems.append(f"USB card {card} playback control '{control}' is low ({max(levels)}%): "
+                                f"amixer -c {card} sset '{control}' 100%")
     return problems
 
 
