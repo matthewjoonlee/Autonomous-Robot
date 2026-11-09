@@ -1,0 +1,5 @@
+timestamp,image,mount,pose,note,camera_index,sensor_timestamp_ns,exposure_time_us,analogue_gain
+2026-11-09T16:34:12.385648-05:00,001_top_straight_out_center_stright.png,"top, straight out",center stright,,1,479231726000,,
+2026-11-09T16:35:04.782012-05:00,002_top_straight_out_center_straight.png,"top, straight out",center straight,,1,531794745000,,
+2026-11-09T16:36:06.720986-05:00,003_top_straight_out_center_straight.png,"top, straight out",center straight,,1,593734325000,,
+2026-11-09T16:36:28.663915-05:00,004_top_straight_out_q.png,"top, straight out",q,,1,615675608000,,
