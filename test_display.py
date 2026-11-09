@@ -45,21 +45,15 @@ CAMERA_COLOR_CONVERSIONS = {
 CAMERA_TUNING_CONTROLS = {
     SIDE_CAMERA_ID: {
         "AeEnable": True,
-        "ExposureValue": 1.4,
-        "Brightness": 0.18,
-        "Contrast": 1.25,
-        "Sharpness": 2.0,
+        "ExposureValue": 0.0,
+        "Brightness": 0.0,
+        "Contrast": 1.0,
+        "Sharpness": 1.0,
         "AfMode": 2,
     },
 }
-CAMERA_SOFTWARE_ENHANCEMENT = {
-    SIDE_CAMERA_ID: {
-        "alpha": 1.35,
-        "beta": 34,
-        "gamma": 0.72,
-        "sharpen_amount": 0.55,
-    },
-}
+# Show unmodified camera brightness; avoid stacking software exposure boosts.
+CAMERA_SOFTWARE_ENHANCEMENT = {}
 
 
 # -------------------------
