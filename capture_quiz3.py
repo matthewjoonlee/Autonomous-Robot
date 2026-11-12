@@ -57,14 +57,34 @@ def slug(text):
     return re.sub(r"[^a-z0-9.+-]+", "_", text.lower()).strip("_")[:50] or "photo"
 
 
-def read_heading(imu):
+def read_heading(imu, tries=10):
+    """Heading in degrees, retrying briefly: the BNO055 sometimes returns no reading."""
     if imu is None:
         return None
+    for attempt in range(tries):
+        try:
+            value = imu.heading()
+        except Exception:
+            value = None
+        if value is not None and math.isfinite(value):
+            return value
+        if attempt < tries - 1:
+            time.sleep(0.05)
+    return None
+
+
+def imu_diagnosis(imu, init_error):
+    """Why the heading is unavailable, in plain words."""
+    if imu is None:
+        return (f"The IMU did not start: {init_error}. Check its wiring and power, then run "
+                "`i2cdetect -y 1` (the BNO055 should show as 28) or `python test_imu.py`.")
     try:
-        value = imu.heading()
-    except Exception:
-        return None
-    return value if value is not None and math.isfinite(value) else None
+        euler = imu._sensor.euler  # bypass the wrapper, which hides errors
+        return (f"The IMU started but returns no heading (raw euler {euler}). It may still be "
+                "settling; wait a few seconds and try z again, or restart the program.")
+    except Exception as exc:
+        return (f"The IMU started but reading it fails: {exc!r}. Check the I2C wiring, then "
+                "run `python test_imu.py`.")
 
 
 def ask(prompt, allowed=None):
@@ -103,6 +123,7 @@ def main():
     args = parser.parse_args()
 
     front = side = imu = None
+    imu_error = None
     started = []
     previous = signal.getsignal(signal.SIGTERM)
 
@@ -138,7 +159,7 @@ def main():
             from imu_controller import IMUDevice
             imu = IMUDevice()
         except Exception as exc:
-            print(f"WARNING: IMU unavailable ({exc}); headings will be blank.")
+            imu_error = repr(exc)
             imu = None
         time.sleep(2)
         metadata = front.capture_metadata()
@@ -151,6 +172,9 @@ def main():
         print(f"Saving to {session} ({view} front view). No motor commands are sent.")
         print(CHECKLIST)
         print("Commands:" + __doc__.split("type a command:")[1].split("Results:")[0])
+        if read_heading(imu) is None:
+            print("WARNING: no IMU heading. " + imu_diagnosis(imu, imu_error))
+            print("Photos still save; for a, d, x write the approximate angle in the note.")
         reference = None
         mat = ""
         with (session / "captures.csv").open("x", newline="") as log:
@@ -162,7 +186,7 @@ def main():
                     break
                 if command == "z":
                     reference = read_heading(imu)
-                    print("Heading unavailable." if reference is None
+                    print("Heading unavailable. " + imu_diagnosis(imu, imu_error) if reference is None
                           else f"Reference {reference:.2f} deg.")
                     continue
                 if command == "m":
