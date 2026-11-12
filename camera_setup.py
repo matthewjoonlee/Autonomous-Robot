@@ -23,8 +23,18 @@ SIDE_CAPTURE_SIZE = (1024, 768)
 SIDE_SIZE = (640, 480)
 
 
-def front_config(camera):
-    """Picamera2 configuration for the full-view front camera."""
+LEGACY_FRONT_SIZE = (640, 480)
+
+
+def front_config(camera, legacy=False):
+    """Picamera2 configuration for the full-view front camera.
+
+    legacy=True returns the old cropped setup (640x480, sensor mode left to Picamera2),
+    which the existing lane-centering calibration was measured on.
+    """
+    if legacy:
+        return camera.create_video_configuration(
+            main={"size": LEGACY_FRONT_SIZE, "format": "XRGB8888"}, queue=False)
     main = {"size": FRONT_SIZE, "format": "XRGB8888"}
     try:
         return camera.create_video_configuration(
