@@ -1,0 +1,19 @@
+Camera 0: {'Model': 'imx708', 'Location': 2, 'Rotation': 180, 'Id': '/base/axi/pcie@1000120000/rp1/i2c@80000/imx708@1a', 'Num': 0}
+  Full sensor area: (0, 0, 4608, 2592)
+  mode {'format': SRGGB10_CSI2P, 'unpacked': 'SRGGB10', 'bit_depth': 10, 'size': (1536, 864), 'fps': 120.13, 'crop_limits': (768, 432, 3072, 1728), 'exposure_limits': (9, 77208145, 20000)}
+  mode {'format': SRGGB10_CSI2P, 'unpacked': 'SRGGB10', 'bit_depth': 10, 'size': (2304, 1296), 'fps': 56.03, 'crop_limits': (0, 0, 4608, 2592), 'exposure_limits': (13, 112015096, 20000)}
+  mode {'format': SRGGB10_CSI2P, 'unpacked': 'SRGGB10', 'bit_depth': 10, 'size': (4608, 2592), 'fps': 14.35, 'crop_limits': (0, 0, 4608, 2592), 'exposure_limits': (26, 220416802, 20000)}
+  current setup: main (640, 480), sensor mode (1536, 864)
+    ScalerCrop (1152, 432, 2304, 1728) of full (0, 0, 4608, 2592): 50% width, 67% height
+  full FOV: main (640, 360), sensor mode (2304, 1296)
+    ScalerCrop (0, 0, 4608, 2592) of full (0, 0, 4608, 2592): 100% width, 100% height
+
+Camera 1: {'Model': 'Webcam: Webcam', 'Location': 2, 'Id': '/base/axi/pcie@1000120000/rp1/usb@200000-1:1.0-0c45:6366', 'Num': 1}
+  Full sensor area: (0, 0, 2048, 1536)
+  mode {'format': 'MJPEG'}
+  mode {'format': 'YUYV'}
+  current setup: main (640, 480), sensor mode None
+    ScalerCrop not reported (USB/UVC cameras usually do not); compare the images
+  largest size: main (2048, 1536), sensor mode None
+    ScalerCrop not reported (USB/UVC cameras usually do not); compare the images
+
