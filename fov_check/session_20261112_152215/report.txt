@@ -1,0 +1,12 @@
+Camera 0: {'Model': 'imx708', 'Location': 2, 'Rotation': 180, 'Id': '/base/axi/pcie@1000120000/rp1/i2c@80000/imx708@1a', 'Num': 0}
+  Full sensor area: (0, 0, 0, 0)
+  mode (1536, 864) SRGGB10_CSI2P fps 120 crop_limits (768, 432, 3072, 1728)
+  mode (2304, 1296) SRGGB10_CSI2P fps 56 crop_limits (0, 0, 4608, 2592)
+  mode (4608, 2592) SRGGB10_CSI2P fps 14 crop_limits (0, 0, 4608, 2592)
+  current setup: main (640, 480), sensor mode (1536, 864)
+  Camera 0 failed: ZeroDivisionError('division by zero')
+
+Camera 1: {'Model': 'Webcam: Webcam', 'Location': 2, 'Id': '/base/axi/pcie@1000120000/rp1/usb@200000-1:1.0-0c45:6366', 'Num': 1}
+  Full sensor area: (0, 0, 2048, 1536)
+  Camera 1 failed: KeyError('size')
+
