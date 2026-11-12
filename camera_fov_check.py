@@ -154,9 +154,55 @@ def check(index, info, session, cv2, np, Picamera2, lines):
         camera.close()
 
 
+SWEEP_SIZES = [(640, 480), (800, 600), (1024, 768), (1280, 720), (1280, 960),
+               (1600, 1200), (1920, 1080), (2048, 1536)]
+
+
+def sweep(index, session, cv2, np, Picamera2, lines, frames=30):
+    """Capture one USB camera at several sizes to see which ones show the full view."""
+    lines.append(f"Size sweep, camera {index} (each image shrunk to 640 wide for comparison):")
+    tiles = []
+    camera = Picamera2(index)
+    try:
+        for size in SWEEP_SIZES:
+            try:
+                camera.configure(camera.create_video_configuration(
+                    main={"size": size, "format": "XRGB8888"}, queue=False))
+                actual = tuple(camera.camera_configuration()["main"]["size"])
+                camera.start()
+                try:
+                    time.sleep(1.5)
+                    start = time.monotonic()
+                    for _ in range(frames):
+                        frame = camera.capture_array("main")
+                    fps = frames / (time.monotonic() - start)
+                finally:
+                    camera.stop()
+            except Exception as exc:
+                lines.append(f"  requested {size}: failed {exc!r}")
+                continue
+            lines.append(f"  requested {size}: got {actual}, {fps:.1f} fps")
+            bgr = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR) if frame.shape[2] == 4 else frame
+            tile = cv2.resize(bgr, (640, round(640 * bgr.shape[0] / bgr.shape[1])),
+                              interpolation=cv2.INTER_AREA)
+            cv2.putText(tile, f"{actual[0]}x{actual[1]}  {fps:.0f} fps", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+            cv2.imwrite(str(session / f"camera{index}_sweep_{actual[0]}x{actual[1]}.png"), tile)
+            tiles.append(cv2.copyMakeBorder(tile, 0, 480 - tile.shape[0] + 8, 0, 8,
+                                            cv2.BORDER_CONSTANT))
+    finally:
+        camera.close()
+    if tiles:
+        rows = [np.hstack(tiles[i:i + 4] + [np.zeros_like(tiles[0])] * (4 - len(tiles[i:i + 4])))
+                for i in range(0, len(tiles), 4)]
+        cv2.imwrite(str(session / f"camera{index}_sweep.png"), np.vstack(rows))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("fov_check"))
+    parser.add_argument("--sweep", type=int, metavar="INDEX",
+                        help="instead: capture camera INDEX (the USB side camera) at several sizes")
     args = parser.parse_args()
 
     import cv2
@@ -170,6 +216,13 @@ def main():
     if not cameras:
         print("No cameras found.")
         return 1
+    if args.sweep is not None:
+        sweep(args.sweep, session, cv2, np, Picamera2, lines)
+        report = "\n".join(lines)
+        print(report)
+        (session / "report.txt").write_text(report + "\n")
+        print(f"Saved to {session}")
+        return 0
     for index, info in enumerate(cameras):
         try:
             check(index, info, session, cv2, np, Picamera2, lines)
