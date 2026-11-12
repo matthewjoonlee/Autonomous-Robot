@@ -8,10 +8,16 @@ import time
 from sabertooth import Sabertooth
 from ps5_controller import PS5_Controller
 
+def soften(value, limit=127):
+    # Squared stick response: half stick gives a quarter of full speed, so small
+    # pushes are gentle, while full stick still reaches full speed.
+    scaled = value / limit
+    return round(limit * scaled * abs(scaled))
+
 def move_robot(saber, control_request):
     # Sends motor commands to the Sabertooth motor controller.
-    speed = -control_request["reqLeftJoyYValue"]
-    turn = -control_request["reqLeftJoyXValue"]
+    speed = -soften(control_request["reqLeftJoyYValue"])
+    turn = -soften(control_request["reqLeftJoyXValue"])
     saber.drive(speed, turn)
 
 def main():
