@@ -15,7 +15,11 @@ relative to the `z` reference. Move the robot by hand, hold still, then type a c
   m          set the mat label used by `i` (e.g. four_way, right_turn)
   s          sign photo: asks which sign (left/right/straight/pause/none) and where
   n          any other labeled photo
+  v          reconnect the side camera after it drops out
   q          finish
+
+If a camera stops responding (e.g. the USB side camera disconnects), the capture gives
+up after a few seconds instead of freezing; the front-only photos keep saving.
 
 Results: quiz3_captures/session_*/ with NNN_front_*.png, NNN_side_*.png, captures.csv.
 """
@@ -24,10 +28,12 @@ import argparse
 import csv
 from datetime import datetime
 import math
+import os
 from pathlib import Path
 import re
 import signal
 import sys
+import threading
 import time
 
 LANE_POSES = {
@@ -104,6 +110,40 @@ def ask_inches(prompt):
             print("Enter a number of inches, e.g. 24 or -6.")
 
 
+HUNG = []  # devices that stopped responding; never touched again (cleanup would hang too)
+
+
+def with_timeout(work, seconds):
+    """Run work() in a helper thread; raise TimeoutError if it takes too long.
+
+    A camera that disconnects mid-capture blocks forever inside libcamera, which
+    froze this tool; the stuck helper thread is abandoned instead.
+    """
+    box = {}
+
+    def run():
+        try:
+            box["value"] = work()
+        except BaseException as exc:
+            box["error"] = exc
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        raise TimeoutError(f"no response in {seconds:g} s")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+def open_side(Picamera2, side_config, choose_side, index=None):
+    camera = Picamera2(index if index is not None else choose_side(Picamera2.global_camera_info()))
+    camera.configure(side_config(camera))
+    camera.start()
+    return camera
+
+
 def grab(camera, convert):
     request = camera.capture_request()
     try:
@@ -148,9 +188,7 @@ def main():
         front.start()
         started.append(front)
         try:
-            side = Picamera2(args.side if args.side is not None else choose_side(infos))
-            side.configure(side_config(side))
-            side.start()
+            side = with_timeout(lambda: open_side(Picamera2, side_config, choose_side, args.side), 10)
             started.append(side)
         except Exception as exc:
             print(f"WARNING: side camera unavailable ({exc}); saving front only.")
@@ -181,13 +219,25 @@ def main():
             writer = csv.DictWriter(log, fieldnames=FIELDS)
             writer.writeheader()
             while True:
-                command = ask("command (z c l r a d x i m s n q)> ")
+                command = ask("command (z c l r a d x i m s n v q)> ")
                 if command == "q":
                     break
                 if command == "z":
                     reference = read_heading(imu)
                     print("Heading unavailable. " + imu_diagnosis(imu, imu_error) if reference is None
                           else f"Reference {reference:.2f} deg.")
+                    continue
+                if command == "v":
+                    if side is not None:
+                        print("Side camera is already working.")
+                        continue
+                    try:
+                        side = with_timeout(lambda: open_side(Picamera2, side_config, choose_side), 10)
+                        started.append(side)
+                        print("Side camera reconnected.")
+                    except Exception as exc:
+                        print(f"Side camera still unavailable ({exc!r}). Check its USB cable; "
+                              "if this keeps failing, quit with q and restart the program.")
                     continue
                 if command == "m":
                     mat = slug(ask("Mat label (e.g. four_way, right_turn)> "))
@@ -215,9 +265,30 @@ def main():
                     continue
                 note = ask("Note (offset, sign position/distance, lighting; Enter to skip)> ")
                 time.sleep(0.3)
-                frame, meta = grab(front, front_bgr)
-                side_frame = grab(side, side_bgr)[0] if side is not None else None
-                heading = read_heading(imu)
+                print("Capturing...", flush=True)
+                try:
+                    frame, meta = with_timeout(lambda: grab(front, front_bgr), 5)
+                except TimeoutError:
+                    HUNG.append(front)
+                    print("The FRONT camera stopped responding. Photos so far are saved. "
+                          "Check its ribbon cable, then restart the program.")
+                    break
+                side_frame = None
+                if side is not None:
+                    try:
+                        side_frame = with_timeout(lambda: grab(side, side_bgr)[0], 5)
+                    except Exception as exc:
+                        if isinstance(exc, TimeoutError):
+                            HUNG.append(side)
+                        print(f"The SIDE camera stopped responding ({exc}). Check its USB cable. "
+                              "Saving this photo front-only; type v to reconnect the side camera.")
+                        side = None
+                try:
+                    heading = with_timeout(lambda: read_heading(imu), 3)
+                except TimeoutError:
+                    HUNG.append(imu)
+                    print("The IMU stopped responding; continuing without headings.")
+                    imu, heading = None, None
                 count += 1
                 stem = f"{count:03d}_{{}}_{slug(label)}.png"
                 front_name = stem.format("front")
@@ -246,14 +317,18 @@ def main():
         return 1
     finally:
         for camera in started:
+            if any(camera is hung for hung in HUNG):
+                continue
             try:
-                camera.stop()
+                with_timeout(camera.stop, 5)
             except Exception:
                 pass
-        for device in (front, side, imu):
-            if device is not None:
+        closed = set()
+        for device in started + [imu]:
+            if device is not None and id(device) not in closed and not any(device is h for h in HUNG):
+                closed.add(id(device))
                 try:
-                    device.close()
+                    with_timeout(device.close, 5)
                 except Exception:
                     pass
         signal.signal(signal.SIGTERM, previous)
@@ -263,4 +338,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    code = main()
+    if HUNG:  # a stuck camera thread would keep Python from exiting
+        sys.stdout.flush()
+        os._exit(code)
+    sys.exit(code)
