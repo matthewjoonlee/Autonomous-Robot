@@ -41,6 +41,10 @@ from capture_quiz3 import HUNG, open_side, read_heading, slug, with_timeout
 CROSS, CIRCLE, TRIANGLE, SQUARE, R1, R2 = 0, 1, 2, 3, 5, 7
 DEFAULT_MARKS = "36,30,24,18,12,6,0,-6,-12"
 MOTOR_INTERVAL = 0.04  # seconds between motor commands (auto-stop is 200 ms)
+# Smallest commands that actually move the robot on the mats: forward 25 moved it
+# ~11 cm/s (Oct 11 motor trials); 20 was never shown to move it. Turns below ~8
+# barely rotate it. The stick starts at these, so any push past the deadzone moves.
+MIN_SPEED, MIN_TURN = 22, 8
 
 
 def open_writer(cv2, path, fps, size):
@@ -122,16 +126,21 @@ def drive_command(held, stick, speed, max_turn, manual_max, deadzone=0.1):
     """(speed, turn) for the Sabertooth, with robot_controller.py's sign conventions.
 
     R1/R2 held: creep forward at a fixed speed, stick x steers within max_turn.
-    Otherwise the left stick drives, scaled to manual_max with a squared response:
-    half stick gives a quarter of manual_max, so small pushes do not lurch.
-    Nothing held: stop.
+    Otherwise the left stick drives: any push past the deadzone starts at the
+    smallest command that moves the robot and rises gently (squared) to manual_max,
+    so small pushes creep instead of lurching. Nothing held: stop.
     """
-    lx, ly = (0.0 if abs(value) < deadzone else value for value in stick)
+    def shaped(value, low, high):
+        if abs(value) < deadzone:
+            return 0
+        fraction = (abs(value) - deadzone) / (1 - deadzone)
+        magnitude = low + (max(high, low) - low) * fraction ** 2
+        return round(magnitude if value > 0 else -magnitude)
+
+    lx, ly = stick
     if R1 in held or R2 in held:
-        return speed, -round(lx * max_turn)
-    if lx or ly:
-        return -round(ly * abs(ly) * manual_max), -round(lx * abs(lx) * manual_max)
-    return 0, 0
+        return speed, -round((0.0 if abs(lx) < deadzone else lx) * max_turn)
+    return -shaped(ly, MIN_SPEED, manual_max), -shaped(lx, MIN_TURN, manual_max)
 
 
 def parse_marks(text):
@@ -146,9 +155,9 @@ def main():
     parser.add_argument("--label", default="run", help="e.g. four_way or right_turn")
     parser.add_argument("--drive", action="store_true", help="drive with the controller (motors on)")
     parser.add_argument("--pad", action="store_true", help="controller buttons for marks, no motors")
-    parser.add_argument("--speed", type=int, default=20, help="R1 creep speed (lane centering uses 25)")
+    parser.add_argument("--speed", type=int, default=25, help="R1 creep speed (25 moved ~11 cm/s)")
     parser.add_argument("--max-turn", type=int, default=15, help="steering while creeping")
-    parser.add_argument("--manual-max", type=int, default=30, help="left-stick drive limit")
+    parser.add_argument("--manual-max", type=int, default=45, help="left-stick drive limit")
     parser.add_argument("--marks", type=parse_marks, default=parse_marks(DEFAULT_MARKS),
                         help=f"distances for Cross presses, in order (default {DEFAULT_MARKS})")
     parser.add_argument("--fps", type=float, default=10.0)
@@ -234,7 +243,11 @@ def main():
             if now - last_motor < MOTOR_INTERVAL:
                 return
             last_motor = now
-            command = drive_command(held, stick, args.speed, args.max_turn, args.manual_max)
+            new = drive_command(held, stick, args.speed, args.max_turn, args.manual_max)
+            if new != command:
+                print(f"  motors: speed {new[0]:+d} turn {new[1]:+d}"
+                      + ("  (stopped)" if new == (0, 0) else ""))
+            command = new
             if command == (0, 0):
                 saber.stop()
             else:
