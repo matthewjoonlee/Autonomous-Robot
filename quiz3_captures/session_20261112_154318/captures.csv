@@ -1,0 +1,15 @@
+timestamp,number,kind,label,mat,distance_in,sign,note,front_image,side_image,heading_rel_deg,front_exposure_us,front_gain,view
+2026-11-12T15:43:41.782347-05:00,1,lane,centered_straight,,,,,001_front_centered_straight.png,001_side_centered_straight.png,0.0,12692,1.4992679357528687,full
+2026-11-12T15:43:59.510690-05:00,2,lane,centered_straight,,,,,002_front_centered_straight.png,002_side_centered_straight.png,-1.1875,13601,1.4992679357528687,full
+2026-11-12T15:44:23.769548-05:00,3,lane,centered_straight,,,,,003_front_centered_straight.png,003_side_centered_straight.png,-0.1875,16219,1.4992679357528687,full
+2026-11-12T15:45:20.856414-05:00,4,lane,centered_straight,,,,l,004_front_centered_straight.png,004_side_centered_straight.png,-0.25,12826,1.4992679357528687,full
+2026-11-12T15:45:35.414458-05:00,5,lane,left_offset_straight,,,,,005_front_left_offset_straight.png,005_side_left_offset_straight.png,-0.3125,15311,1.4992679357528687,full
+2026-11-12T15:45:51.581746-05:00,6,lane,right_offset_straight,,,,,006_front_right_offset_straight.png,006_side_right_offset_straight.png,0.5625,14322,1.4992679357528687,full
+2026-11-12T15:46:02.151768-05:00,7,lane,right_offset_straight,,,,,007_front_right_offset_straight.png,007_side_right_offset_straight.png,0.8125,17155,1.4992679357528687,full
+2026-11-12T15:46:23.499861-05:00,8,lane,centered_rotated_left,,,,,008_front_centered_rotated_left.png,008_side_centered_rotated_left.png,-28.9375,17208,1.4992679357528687,full
+2026-11-12T15:46:34.443382-05:00,9,lane,centered_rotated_left,,,,,009_front_centered_rotated_left.png,009_side_centered_rotated_left.png,-19.3125,17823,1.4992679357528687,full
+2026-11-12T15:46:47.862694-05:00,10,lane,centered_rotated_right,,,,,010_front_centered_rotated_right.png,010_side_centered_rotated_right.png,15.3125,23060,1.4992679357528687,full
+2026-11-12T15:46:58.051538-05:00,11,lane,centered_rotated_right,,,,,011_front_centered_rotated_right.png,011_side_centered_rotated_right.png,21.25,29981,1.5306427478790283,full
+2026-11-12T15:47:24.957590-05:00,12,lane,combined_offset_rotation,,,,,012_front_combined_offset_rotation.png,012_side_combined_offset_rotation.png,-0.125,23781,1.4992679357528687,full
+2026-11-12T15:47:43.346548-05:00,13,lane,combined_offset_rotation,,,,,013_front_combined_offset_rotation.png,013_side_combined_offset_rotation.png,-179.1875,32680,3.6183745861053467,full
+2026-11-12T16:05:12.885978-05:00,14,intersection,four_+36in,four,36.0,,,014_front_four_+36in.png,014_side_four_+36in.png,-177.125,32680,4.995121955871582,full
