@@ -4,16 +4,18 @@ Drive with the PS4/PS5 controller (recommended):
     python record_quiz3.py --label four_way --drive
 
   Left stick     drive normally (to get to the start; capped at --manual-max)
-  hold R1 / R2   creep straight forward at the fixed --speed (left stick steers a little)
+  hold R1 / R2   creep forward at the fixed --speed; the IMU holds the heading you had
+                 when you pressed it (left stick steers; the new direction is then held)
   Cross (X)      START recording; after that, mark the next tape distance from --marks
   Triangle       skip the next distance in --marks (if you missed that tape mark)
   Square         unlabeled mark
   Circle         stop recording (motors stop too)
 
-Each time the robot's CENTER mark passes a tape-measure mark, press Cross. The
-distances are taken in order from --marks (default 36 30 24 18 12 6 0 -6 -12 inches;
-+ before the cross-road center line, - past it). Frames between marks get distances
-by interpolation. Do not run robot_controller.py at the same time.
+Default marks are just 36 and -12 (inches; + before the cross-road center line,
+- past it): press Cross once with the robot's CENTER at 36 right after starting, hold
+R1 the whole way, and press Cross again when the center reaches -12. Holding R1 keeps
+the speed constant, so the frames in between are placed by time (and checked against
+the lane dashes). Do not run robot_controller.py at the same time.
 
 Push by hand instead (no motors):
     python record_quiz3.py --label four_way
@@ -27,6 +29,7 @@ side.mp4 (same frame numbering), frames.csv (time, heading, motor command), mark
 
 import argparse
 import csv
+import math
 from datetime import datetime
 import os
 from pathlib import Path
@@ -39,12 +42,30 @@ from capture_quiz3 import HUNG, open_side, read_heading, slug, with_timeout
 
 # Button numbers as in ps5_controller.py (same for PS4 controllers on the Pi).
 CROSS, CIRCLE, TRIANGLE, SQUARE, R1, R2 = 0, 1, 2, 3, 5, 7
-DEFAULT_MARKS = "36,30,24,18,12,6,0,-6,-12"
+DEFAULT_MARKS = "36,-12"
 MOTOR_INTERVAL = 0.04  # seconds between motor commands (auto-stop is 200 ms)
 # Smallest commands that actually move the robot on the mats: forward 25 moved it
 # ~11 cm/s (Oct 11 motor trials); 20 was never shown to move it. Turns below ~8
 # barely rotate it. The stick starts at these, so any push past the deadzone moves.
 MIN_SPEED, MIN_TURN = 22, 8
+# Heading hold while creeping, with quiz3_autonomous.py's conventions: physical turn =
+# gain * (held - heading), lifted past the ~4-unit motor dead zone, sent negated
+# (Sabertooth turn is reversed). Without it the robot drifted ~4 deg left in 11 s.
+HOLD_GAIN, HOLD_DEADZONE = 3.0, 4.0
+
+
+def hold_turn(error_deg, max_turn):
+    """Raw Sabertooth turn that steers back toward the held heading.
+
+    error_deg = heading - held heading (IMU: right positive). Turned left (negative
+    error) asks for a physical right turn, which is a negative raw command.
+    """
+    physical = max(-max_turn, min(max_turn, HOLD_GAIN * -error_deg))
+    if abs(physical) < 0.5:
+        return 0
+    span = max_turn - HOLD_DEADZONE
+    physical = math.copysign(HOLD_DEADZONE + abs(physical) * span / max_turn, physical)
+    return -round(physical)
 
 
 def open_writer(cv2, path, fps, size):
@@ -122,10 +143,11 @@ class Pad:
             pass
 
 
-def drive_command(held, stick, speed, max_turn, manual_max, deadzone=0.1):
+def drive_command(held, stick, speed, max_turn, manual_max, deadzone=0.1, hold=0):
     """(speed, turn) for the Sabertooth, with robot_controller.py's sign conventions.
 
-    R1/R2 held: creep forward at a fixed speed, stick x steers within max_turn.
+    R1/R2 held: creep forward at a fixed speed; stick x steers within max_turn,
+    otherwise `hold` (from hold_turn) keeps the heading.
     Otherwise the left stick drives: any push past the deadzone starts at the
     smallest command that moves the robot and rises gently (squared) to manual_max,
     so small pushes creep instead of lurching. Nothing held: stop.
@@ -139,7 +161,7 @@ def drive_command(held, stick, speed, max_turn, manual_max, deadzone=0.1):
 
     lx, ly = stick
     if R1 in held or R2 in held:
-        return speed, -round((0.0 if abs(lx) < deadzone else lx) * max_turn)
+        return speed, (-round(lx * max_turn) if abs(lx) >= deadzone else hold)
     return -shaped(ly, MIN_SPEED, manual_max), -shaped(lx, MIN_TURN, manual_max)
 
 
@@ -155,8 +177,9 @@ def main():
     parser.add_argument("--label", default="run", help="e.g. four_way or right_turn")
     parser.add_argument("--drive", action="store_true", help="drive with the controller (motors on)")
     parser.add_argument("--pad", action="store_true", help="controller buttons for marks, no motors")
-    parser.add_argument("--speed", type=int, default=25, help="R1 creep speed (25 moved ~11 cm/s)")
+    parser.add_argument("--speed", type=int, default=22, help="R1 creep speed (22 moved ~7 cm/s, the slowest that moves)")
     parser.add_argument("--max-turn", type=int, default=15, help="steering while creeping")
+    parser.add_argument("--no-hold", action="store_true", help="no IMU heading hold while creeping")
     parser.add_argument("--manual-max", type=int, default=45, help="left-stick drive limit")
     parser.add_argument("--marks", type=parse_marks, default=parse_marks(DEFAULT_MARKS),
                         help=f"distances for Cross presses, in order (default {DEFAULT_MARKS})")
@@ -233,20 +256,34 @@ def main():
         blank_side = np.zeros((SIDE_SIZE[1], SIDE_SIZE[0], 3), dtype=np.uint8)
 
         last_motor = 0.0
+        latest_heading = None  # degrees relative to the recording start; updated per frame
+        held_heading = None
 
         def update_motors(held=frozenset(), stick=(0.0, 0.0)):
             """Send the controller's drive command at most every MOTOR_INTERVAL."""
-            nonlocal command, last_motor
+            nonlocal command, last_motor, held_heading
             if saber is None:
                 return
             now = time.monotonic()
             if now - last_motor < MOTOR_INTERVAL:
                 return
             last_motor = now
-            new = drive_command(held, stick, args.speed, args.max_turn, args.manual_max)
-            if new != command:
-                print(f"  motors: speed {new[0]:+d} turn {new[1]:+d}"
-                      + ("  (stopped)" if new == (0, 0) else ""))
+            creeping = R1 in held or R2 in held
+            steering = abs(stick[0]) >= 0.1
+            hold = 0
+            if creeping and not steering and latest_heading is not None and not args.no_hold:
+                if held_heading is None:
+                    held_heading = latest_heading
+                error = (latest_heading - held_heading + 180) % 360 - 180
+                hold = hold_turn(error, args.max_turn)
+            else:
+                held_heading = None  # re-captured when creeping straight again
+            new = drive_command(held, stick, args.speed, args.max_turn, args.manual_max, hold=hold)
+            if new[0] != command[0]:
+                print(f"  motors: speed {new[0]:+d}"
+                      + ("  (stopped)" if new == (0, 0) else
+                         "  holding heading" if creeping and not steering and hold is not None
+                         and latest_heading is not None and not args.no_hold else ""))
             command = new
             if command == (0, 0):
                 saber.stop()
@@ -363,6 +400,7 @@ def main():
                         if value is not None and reference is not None:
                             from test_imu import signed_delta
                             heading = round(signed_delta(value, reference, imu.SIGN), 3)
+                            latest_heading = heading
                     except TimeoutError:
                         HUNG.append(imu)
                         imu = None
