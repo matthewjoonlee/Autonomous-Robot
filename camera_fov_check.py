@@ -29,19 +29,22 @@ def rect(value):
         return None
 
 
-def full_area(camera):
+def usable(area):
+    return area if area and area[2] > 0 and area[3] > 0 else None
+
+
+def full_area(camera, modes):
     """Largest crop rectangle the sensor allows, in sensor pixel coordinates."""
-    for key in ("ScalerCropMaximum",):
-        area = rect(camera.camera_properties.get(key))
-        if area:
-            return area
+    candidates = [rect(camera.camera_properties.get("ScalerCropMaximum"))]
     limits = camera.camera_controls.get("ScalerCrop")
     if limits:
-        area = rect(limits[1])
-        if area:
-            return area
+        candidates.append(rect(limits[1]))
     size = camera.camera_properties.get("PixelArraySize")
-    return (0, 0, int(size[0]), int(size[1])) if size else None
+    if size:
+        candidates.append((0, 0, int(size[0]), int(size[1])))
+    candidates += [rect(m.get("crop_limits")) for m in modes]
+    candidates = [a for a in candidates if usable(a)]
+    return max(candidates, key=lambda a: a[2] * a[3]) if candidates else None
 
 
 def widest_mode(modes):
@@ -49,6 +52,9 @@ def widest_mode(modes):
     def coverage(mode):
         crop = rect(mode.get("crop_limits"))
         return crop[2] * crop[3] if crop else mode["size"][0] * mode["size"][1]
+    modes = [m for m in modes if m.get("size")]
+    if not modes:
+        return None
     best = max(coverage(m) for m in modes)
     return min((m for m in modes if coverage(m) >= 0.98 * best),
                key=lambda m: m["size"][0] * m["size"][1])
@@ -66,12 +72,23 @@ def capture(camera, config, settle=2.0):
         camera.stop()
 
 
-def describe(name, metadata, configuration, area, lines):
+def describe(name, metadata, configuration, area, lines, modes=()):
     sensor = configuration.get("sensor") or {}
     raw = configuration.get("raw") or {}
-    lines.append(f"  {name}: main {configuration['main']['size']}, "
-                 f"sensor mode {sensor.get('output_size', raw.get('size'))}")
-    crop = rect(metadata.get("ScalerCrop"))
+    mode_size = sensor.get("output_size", raw.get("size"))
+    lines.append(f"  {name}: main {configuration['main']['size']}, sensor mode {mode_size}")
+    crop = usable(rect(metadata.get("ScalerCrop")))
+    if not crop:  # fall back to the chosen mode's crop limits, then the output aspect cut
+        mode = next((m for m in modes if tuple(m.get("size", ())) == tuple(mode_size or ())), None)
+        limits = usable(rect(mode.get("crop_limits"))) if mode else None
+        if limits:
+            out_w, out_h = configuration["main"]["size"]
+            w, h = limits[2], limits[3]
+            if out_w / out_h < w / h:
+                w = h * out_w / out_h
+            else:
+                h = w * out_h / out_w
+            crop = (0, 0, round(w), round(h))
     if crop and area:
         lines.append(f"    ScalerCrop {crop} of full {area}: "
                      f"{100 * crop[2] / area[2]:.0f}% width, {100 * crop[3] / area[3]:.0f}% height")
@@ -83,21 +100,24 @@ def check(index, info, session, cv2, np, Picamera2, lines):
     lines.append(f"Camera {index}: {info}")
     camera = Picamera2(index)
     try:
-        area = full_area(camera)
-        modes = camera.sensor_modes
+        try:
+            modes = list(camera.sensor_modes)
+        except Exception as exc:
+            modes = []
+            lines.append(f"  sensor_modes unavailable: {exc!r}")
+        area = full_area(camera, modes)
         lines.append(f"  Full sensor area: {area}")
         for mode in modes:
-            lines.append(f"  mode {mode['size']} {mode.get('format')} fps {mode.get('fps', 0):.0f} "
-                         f"crop_limits {mode.get('crop_limits')}")
+            lines.append(f"  mode {mode}")
 
         current = camera.create_video_configuration(
             main={"size": CURRENT_SIZE, "format": "XRGB8888"}, queue=False)
         frame_a, meta_a, conf_a = capture(camera, current)
-        describe("current setup", meta_a, conf_a, area, lines)
+        describe("current setup", meta_a, conf_a, area, lines, modes)
 
         images = [frame_a]
-        if modes:
-            mode = widest_mode(modes)
+        mode = widest_mode(modes) if modes else None
+        if mode:
             w, h = mode["size"]
             size = (FULL_WIDTH, round(FULL_WIDTH * h / w / 2) * 2)
             try:
@@ -111,10 +131,17 @@ def check(index, info, session, cv2, np, Picamera2, lines):
                     raw={"size": mode["size"], "format": mode.get("unpacked", mode["format"])},
                     queue=False)
             frame_b, meta_b, conf_b = capture(camera, full)
-            describe("full FOV", meta_b, conf_b, area, lines)
+            describe("full FOV", meta_b, conf_b, area, lines, modes)
             images.append(frame_b)
+        elif area:  # USB/UVC: capture at the camera's largest size, shrink to 640 wide
+            full = camera.create_video_configuration(
+                main={"size": (area[2], area[3]), "format": "XRGB8888"}, queue=False)
+            frame_b, meta_b, conf_b = capture(camera, full)
+            describe("largest size", meta_b, conf_b, area, lines)
+            h = round(FULL_WIDTH * frame_b.shape[0] / frame_b.shape[1])
+            images.append(cv2.resize(frame_b, (FULL_WIDTH, h), interpolation=cv2.INTER_AREA))
         else:
-            lines.append("  No sensor modes listed; only the current setup was captured")
+            lines.append("  No usable sensor modes; only the current setup was captured")
 
         bgr = [cv2.cvtColor(img, cv2.COLOR_BGRA2BGR) if img.shape[2] == 4 else img for img in images]
         height = max(img.shape[0] for img in bgr)
