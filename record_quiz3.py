@@ -40,13 +40,30 @@ def open_writer(cv2, path, fps, size):
     return writer
 
 
-def read_line():
-    """A typed line if one is waiting on stdin, '' if none, None at end of input."""
-    ready, _, _ = select.select([sys.stdin], [], [], 0)
-    if not ready:
-        return ""
-    line = sys.stdin.readline()
-    return None if line == "" else line.rstrip("\n") or "\n"
+class LineReader:
+    """Non-blocking typed lines from stdin.
+
+    Reads the file descriptor directly: mixing select() with Python's buffered
+    sys.stdin let a readline() block the recording loop until the next line.
+    """
+
+    def __init__(self):
+        self.fd = sys.stdin.fileno()
+        self.buffer = b""
+        self.closed = False
+        self.pending = []
+
+    def poll(self):
+        while not self.closed and select.select([self.fd], [], [], 0)[0]:
+            chunk = os.read(self.fd, 1024)
+            if not chunk:
+                self.closed = True
+            self.buffer += chunk
+        lines, self.pending = self.pending, []
+        while b"\n" in self.buffer:
+            line, self.buffer = self.buffer.split(b"\n", 1)
+            lines.append(line.decode(errors="replace").strip())
+        return lines
 
 
 def main():
@@ -111,7 +128,17 @@ def main():
         blank_side = np.zeros((SIDE_SIZE[1], SIDE_SIZE[0], 3), dtype=np.uint8)
 
         print(f"Saving to {folder}. No motor commands are sent.")
-        input("Put the robot at its start position, then press Enter to START recording> ")
+        reader = LineReader()  # one reader for everything typed, so nothing is lost
+        print("Put the robot at its start position, then press Enter to START recording> ",
+              end="", flush=True)
+        while True:
+            typed = reader.poll()
+            if typed:
+                reader.pending = typed[1:]  # anything typed after Enter counts as marks
+                break
+            if reader.closed:
+                raise EOFError
+            time.sleep(0.05)
         print("RECORDING. Type the robot-center distance (inches) + Enter at each tape mark; "
               "q + Enter stops.")
         with (folder / "frames.csv").open("x", newline="") as frame_log, \
@@ -123,29 +150,27 @@ def main():
             start = time.monotonic()
             next_frame = start
             last_report = start
-            input_open = True
+            stop = False
             while True:
                 now = time.monotonic()
                 elapsed = now - start
                 if elapsed >= args.max_seconds:
                     print(f"Reached --max-seconds {args.max_seconds:g}; stopping.")
                     break
-                if input_open:
-                    line = read_line()
-                    if line is None:
-                        input_open = False
-                    elif line.strip().lower() == "q":
+                for text in reader.poll():
+                    if text.lower() == "q":
+                        stop = True
                         break
-                    elif line:
-                        text = line.strip()
-                        try:
-                            distance = float(text)
-                        except ValueError:
-                            distance = ""
-                        mark_csv.writerow([f"{elapsed:.3f}", frames, distance, text])
-                        mark_log.flush()
-                        marks += 1
-                        print(f"  mark {text or '(blank)'} at {elapsed:.1f} s, frame {frames}")
+                    try:
+                        distance = float(text)
+                    except ValueError:
+                        distance = ""
+                    mark_csv.writerow([f"{elapsed:.3f}", frames, distance, text])
+                    mark_log.flush()
+                    marks += 1
+                    print(f"  mark {text or '(blank)'} at {elapsed:.1f} s, frame {frames}")
+                if stop:
+                    break
                 if now < next_frame:
                     time.sleep(min(next_frame - now, 0.01))
                     continue
