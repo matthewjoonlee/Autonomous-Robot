@@ -50,6 +50,7 @@ def main():
     try:
         import cv2
         from picamera2 import Picamera2
+        from camera_setup import side_bgr, side_config
 
         cameras = Picamera2.global_camera_info()
         for index, info in enumerate(cameras):
@@ -59,8 +60,7 @@ def main():
             raise RuntimeError(f"Camera index {index} is not in the discovered camera list")
         print(f"Using side camera {index}")
         camera = Picamera2(index)
-        camera.configure(camera.create_video_configuration(
-            main={"size": (640, 480), "format": "XRGB8888"}, queue=False))
+        camera.configure(side_config(camera))
         camera.start()
         started = True
         time.sleep(2)
@@ -105,8 +105,7 @@ def main():
                 try:
                     frame = request.make_array("main")
                     metadata = request.get_metadata()
-                    # Match test_display.py's side-camera channel convention.
-                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                    frame_bgr = side_bgr(frame)  # full view, shrunk to 640x480
                 finally:
                     request.release()
                 name = f"{count + 1:03d}_{slug(mount)}_{slug(pose)}.png"

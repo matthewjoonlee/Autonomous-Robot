@@ -21,6 +21,7 @@ from typing import Any, Dict
 import cv2
 import numpy as np
 
+from camera_setup import front_bgr, front_config, side_bgr, side_config
 from display import RobotDisplay
 
 try:
@@ -253,9 +254,8 @@ def initialize_cameras(width: int, height: int):
 
         try:
             camera = Picamera2(camera_num)
-            config = camera.create_video_configuration(
-                main={"size": (width, height), "format": "XRGB8888"}
-            )
+            # Full field of view; see camera_setup.py.
+            config = front_config(camera) if camera_id == FRONT_CAMERA_ID else side_config(camera)
             camera.configure(config)
             camera.start()
             cameras[camera_id] = camera
@@ -391,9 +391,8 @@ def update_camera_frames(
 
         try:
             frame_array = camera.capture_array()
-            frame_bgr = camera_array_to_bgr(camera_id, frame_array)
-            if frame_bgr.shape[1] != width or frame_bgr.shape[0] != height:
-                frame_bgr = cv2.resize(frame_bgr, (width, height), interpolation=cv2.INTER_LINEAR)
+            # Front: 640x360 full view; side: 1024x768 full view shrunk to 640x480.
+            frame_bgr = front_bgr(frame_array) if camera_id == FRONT_CAMERA_ID else side_bgr(frame_array)
             frame_bgr = enhance_camera_frame(camera_id, frame_bgr)
             camera_frames[camera_id] = frame_bgr
             camera_status[camera_id] = "live"
