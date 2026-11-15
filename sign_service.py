@@ -185,19 +185,59 @@ def _symbols(frame, hsv):
         area, box, solidity, corners = _shape(contour)
         x, y, w, h = box
         long_side, short_side = max(w, h), min(w, h)
+        if area < MIN_ARROW_AREA or not 1.1 <= long_side / short_side <= 3.2:
+            continue
+        label, ratio, details = None, 0.0, ""
         # Course arrows: solidity ~0.78-0.86 (Nov 15 tests); chair/table shapes that
         # slipped through were 0.52-0.67.
-        if (area < MIN_ARROW_AREA or not 0.68 <= solidity <= 0.90 or not 5 <= corners <= 10
-                or not 1.1 <= long_side / short_side <= 3.2):
-            continue
-        mask = np.zeros((h, w), np.uint8)
-        cv2.drawContours(mask, [contour - [x, y]], -1, 1, -1)
-        label, ratio = arrow_direction(mask)
+        if 0.68 <= solidity <= 0.90 and 5 <= corners <= 10:
+            mask = np.zeros((h, w), np.uint8)
+            cv2.drawContours(mask, [contour - [x, y]], -1, 1, -1)
+            label, ratio = arrow_direction(mask)
+            value = float(np.median(val[y:y + h, x:x + w][mask > 0]))
+            details = f"arrow head ratio {ratio:.2f}, solidity {solidity:.2f}, {corners} corners"
+        if (not label or ratio > 4.0) and 0.68 <= solidity <= 0.97 and 4 <= corners <= 10:
+            # A small, blurred arrow smears into a blob whose head barely shows (ratio
+            # 1.0-1.2, solidity ~0.92). Look again at just that region with a cutoff
+            # fitted to it (Otsu): the head reappears (ratio ~1.55).
+            refined = _refine_arrow(val, box)
+            if refined:
+                label, ratio, box, value, details = refined
         if label and ratio <= 4.0:   # real heads are ~2x the shaft
-            found.append((label, box, min(1.0, (ratio - 1) / 2),
-                          f"arrow head ratio {ratio:.2f}, solidity {solidity:.2f}, {corners} corners",
-                          float(np.median(val[y:y + h, x:x + w][mask > 0]))))
+            found.append((label, box, min(1.0, (ratio - 1) / 2), details, value))
     return found
+
+
+def _refine_arrow(val, box):
+    """Re-threshold one candidate region (Otsu); (label, ratio, box, value, details) or None."""
+    import cv2
+    x, y, w, h = box
+    pad = max(3, int(0.3 * min(w, h)))
+    height, width = val.shape
+    x0, y0, x1, y1 = max(0, x - pad), max(0, y - pad), min(width, x + w + pad), min(height, y + h + pad)
+    region = cv2.GaussianBlur(val[y0:y1, x0:x1], (3, 3), 0)
+    cutoff, _ = cv2.threshold(region, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats((region < cutoff).astype(np.uint8))
+    if count < 2:
+        return None
+    k = 1 + int(np.argmax(stats[1:, 4]))
+    bx, by, bw, bh, _ = stats[k]
+    mask = (labels[by:by + bh, bx:bx + bw] == k).astype(np.uint8)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+    area, _, solidity, corners = _shape(max(contours, key=cv2.contourArea))
+    long_side, short_side = max(bw, bh), min(bw, bh)
+    if (area < MIN_ARROW_AREA * 0.8 or not 0.68 <= solidity <= 0.90 or not 5 <= corners <= 10
+            or not 1.1 <= long_side / short_side <= 3.2):
+        return None
+    label, ratio = arrow_direction(mask)
+    if not label:
+        return None
+    new_box = (int(x0 + bx), int(y0 + by), int(bw), int(bh))
+    value = float(np.median(val[y0 + by:y0 + by + bh, x0 + bx:x0 + bx + bw][mask > 0]))
+    return label, ratio, new_box, value, (f"arrow (refined) head ratio {ratio:.2f}, "
+                                          f"solidity {solidity:.2f}, {corners} corners")
 
 
 def detect_sign(frame):
