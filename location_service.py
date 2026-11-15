@@ -66,6 +66,20 @@ def front_sides(frame):
     return left, right
 
 
+def cross_road_ahead(left, right):
+    """True when the front camera sees the cross road still ahead: a row band with no
+    grass beside the road, grass nearer to the robot, and grass beyond it.
+
+    Nov 12 runs: seen only with the robot center more than 32 in from the cross-road
+    center line, never closer. Colors of the front camera held up in a new room.
+    """
+    grass = [min(a, b) for a, b in zip(left, right)]
+    for k in range(len(grass) - 1):
+        if grass[k] < 0.08 and max(grass[k + 1:]) > 0.35 and max(grass[:k] or [0.0]) > 0.15:
+            return True
+    return False
+
+
 def front_features(frame):
     """Grass beside the road per row band, on whichever side has LESS grass.
 
@@ -116,21 +130,41 @@ def features(front, side):
 # ---------------------------------------------------------------- distance model
 
 class LocationModel:
-    """Nearest-neighbor distance estimate against labeled reference frames."""
+    """Nearest-neighbor distance estimate against labeled reference frames.
+
+    `cost` measures how unlike the reference a frame is (mean feature difference to
+    its nearest neighbors). Frames from a room or distance the reference never saw
+    match badly; their estimates are guesses, so the service ignores them.
+    Nov 15: reference runs vs each other 1.06 median / 2.64 at 99%; a brighter lab
+    with a washed-out side camera 3.06 median - it announced wrong zones.
+    """
 
     def __init__(self, path=REFERENCE, neighbors=5):
         data = np.load(path)
         self.features = data["features"].astype(np.float32)
         self.distances = data["distances"].astype(np.float32)
         self.neighbors = neighbors
+        self.max_cost = self._familiar_limit(data["run"] if "run" in data else None)
+
+    def _familiar_limit(self, runs):
+        """99th percentile of each reference frame's cost against the OTHER runs."""
+        if runs is None or len(set(runs.tolist())) < 2:
+            return 2.6
+        costs = []
+        for i in range(0, len(self.features), 3):
+            other = self.features[runs != runs[i]]
+            cost = np.abs(other - self.features[i]).sum(axis=1)
+            costs.append(np.sort(cost)[:self.neighbors].mean())
+        return float(max(2.0, np.percentile(costs, 99)))
 
     def estimate(self, vector):
-        """(distance in inches, spread in inches) - spread is the neighbors' disagreement."""
+        """(distance in inches, spread in inches, cost) - spread is the neighbors' disagreement."""
         usable = ~np.isnan(vector)
         cost = np.abs(self.features[:, usable] - vector[usable]).sum(axis=1)
-        nearest = self.distances[np.argsort(cost)[:self.neighbors]]
+        order = np.argsort(cost)[:self.neighbors]
+        nearest = self.distances[order]
         low, high = np.percentile(nearest, [25, 75])
-        return float(np.median(nearest)), float(high - low)
+        return float(np.median(nearest)), float(high - low), float(cost[order].mean())
 
 
 # ---------------------------------------------------------------- zone tracking
@@ -185,13 +219,15 @@ class ZoneTracker:
 
 # ---------------------------------------------------------------- result + annotations
 
-def result(frame_id, timestamp, tracker, distance, spread):
+def result(frame_id, timestamp, tracker, distance, spread, familiar=True, cost=None):
     """LocationResult as a plain dict (crosses process boundaries cheaply)."""
     phase = tracker.phase
     smoothed = tracker.smoothed
     text = "LOCATION: searching" if phase is None else f"LOCATION: {LABELS[phase]}"
     if smoothed is not None:
         text += f"  ({smoothed:+.0f} in)"
+    if not familiar:
+        text += "  [unfamiliar view]"
     annotations = [
         {"kind": "text", "camera": "front", "xy": (8, 22), "text": text, "color": (0, 255, 255)},
         # Where the location evidence comes from, so judges can see what is measured.
@@ -202,6 +238,7 @@ def result(frame_id, timestamp, tracker, distance, spread):
     ]
     return {
         "frame_id": frame_id, "timestamp": timestamp, "zone": phase,
+        "familiar": familiar, "cost": cost,
         "label": LABELS.get(phase, "Searching"),
         "distance_in": smoothed, "raw_distance_in": distance, "spread_in": spread,
         "sign_read_ready": phase == "read_sign",
@@ -223,9 +260,12 @@ class LocationService:
                                    window=self.tracker.window, max_spread=self.tracker.max_spread)
 
     def process(self, frame_id, timestamp, front, side):
-        distance, spread = self.model.estimate(features(front, side))
-        change = self.tracker.update(distance, spread)
-        out = result(frame_id, timestamp, self.tracker, distance, spread)
+        distance, spread, cost = self.model.estimate(features(front, side))
+        familiar = cost <= self.model.max_cost
+        if familiar and distance < 30 and cross_road_ahead(*front_sides(front)):
+            familiar = False  # the cross road is visibly still ahead: this estimate is wrong
+        change = self.tracker.update(distance if familiar else None, spread)
+        out = result(frame_id, timestamp, self.tracker, distance, spread, familiar, round(cost, 2))
         out["changed"] = change
         return out
 

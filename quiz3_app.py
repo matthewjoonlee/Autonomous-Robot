@@ -95,6 +95,7 @@ class App:
         self.frames = {"front": None, "side": None}
         self.result = None           # newest LocationResult
         self.result_time = 0.0
+        self.familiar_time = 0.0
         self.heading = None          # relative to program start
         self.heading_zero = read_heading(imu)
         self.held_heading = None
@@ -150,7 +151,7 @@ class App:
         self.announced, self.pending, self.phase = -1, [], None
         self.held_heading = self.heading
         self.start_lane(now)
-        self.run_start = self.result_time = now
+        self.run_start = self.result_time = self.familiar_time = now
         self.state = "driving"
         self.message = "Driving"
 
@@ -232,8 +233,13 @@ class App:
                 print("Location worker error:", result["error"])
             elif result["frame_id"] >= self.run_frame0:
                 self.result, self.result_time = result, now
+                if result.get("familiar", True):
+                    self.familiar_time = now
                 if self.state in ("driving", "judging") and result["zone"] is not None:
                     index = PHASES.index(result["zone"])
+                    if self.announced < 0:
+                        # Start: announce only the zone the robot is in, not the ones before it.
+                        self.announced = index - 1
                     # Report every phase in order, even if two arrive together.
                     while self.announced < index:
                         self.announced += 1
@@ -244,6 +250,11 @@ class App:
             if self.pending:
                 self.begin_phase(self.pending.pop(0), now)
             elif now - self.result_time > self.args.lost_s:
+                self.stop_run("Location lost. Stopping.")
+            elif now - self.familiar_time > self.args.unfamiliar_s:
+                # Views unlike the reference for this long: the room needs calibrating.
+                print("Stopping: camera views do not match the location reference "
+                      "(new room? record a calibration run).")
                 self.stop_run("Location lost. Stopping.")
             elif now - self.run_start > self.args.max_run_s:
                 self.stop_run("Stopped")
@@ -443,6 +454,8 @@ def main(argv=None):
     parser.add_argument("--pause-s", type=float, default=1.5, help="judging pause at each phase")
     parser.add_argument("--finish-s", type=float, default=1.5, help="drive after Continue travel")
     parser.add_argument("--lost-s", type=float, default=2.0, help="stop if no location for this long")
+    parser.add_argument("--unfamiliar-s", type=float, default=10.0,
+                        help="stop if the views match no reference frame for this long (~40 in)")
     parser.add_argument("--max-run-s", type=float, default=60.0)
     parser.add_argument("--max-heading", type=float, default=30.0)
     parser.add_argument("--fps", type=float, default=10.0)
