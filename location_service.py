@@ -51,18 +51,31 @@ def zone_index(distance):
 
 # ---------------------------------------------------------------- features
 
-def front_features(frame):
-    """Grass fraction beside the road (outer quarters) in 12 row bands, y 40%-100%."""
+def front_sides(frame):
+    """(left, right) grass fractions beside the road (outer quarters) in 12 row bands."""
     import cv2
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     height, width = frame.shape[:2]
     hue, sat = hsv[..., 0], hsv[..., 1]
     green = (hue >= 30) & (hue < 75) & (sat > 40)
-    values = []
+    left, right = [], []
     for k in range(FRONT_BANDS):
         rows = slice(int(height * (0.40 + 0.05 * k)), int(height * (0.45 + 0.05 * k)))
-        values.append((green[rows, :width // 4].mean() + green[rows, 3 * width // 4:].mean()) / 2)
-    return values
+        left.append(float(green[rows, :width // 4].mean()))
+        right.append(float(green[rows, 3 * width // 4:].mean()))
+    return left, right
+
+
+def front_features(frame):
+    """Grass beside the road per row band, on whichever side has LESS grass.
+
+    The cross road shows as a band with no grass beside the road. Taking the side
+    with less grass finds that opening whether the mat branches left, right, or
+    both, so the four-way recordings also describe T and corner mats. (Averaging
+    both sides, as before, halved the signal on one-sided mats.)
+    """
+    left, right = front_sides(frame)
+    return [min(a, b) for a, b in zip(left, right)]
 
 
 def side_masks(frame):
