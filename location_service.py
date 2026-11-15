@@ -190,7 +190,7 @@ class ZoneTracker:
     The robot drives forward through the intersection, so the zone only moves
     forward. It advances one phase at a time (each phase is reported once, even if
     the robot moves quickly) after `confirm` consecutive smoothed estimates are past
-    the boundary by `margin` inches. Estimates whose neighbors disagree by more than
+    the boundary by `margin` inches (negative: before it, to announce on the line). Estimates whose neighbors disagree by more than
     `max_spread` inches are ignored.
 
     `offset`: how far the point judged for zones sits ahead of the robot center
@@ -199,7 +199,11 @@ class ZoneTracker:
     distance - offset.
     """
     confirm: int = 2
-    margin: float = 0.8   # inches past a boundary before reporting it (read_sign came 0.7 in early at 0.3)
+    # Inches past a boundary before reporting it; NEGATIVE = report this far before the
+    # estimated line, to cancel the delay of smoothing + confirmation (~2 frames, ~0.8 in).
+    # Held-out on 6 runs (33 zone changes): margin +0.8 announced a median 1.7 in past
+    # the line; -0.5 announces a median 0.4 in past it (10%-90%: 0.6 before to 1.1 past).
+    margin: float = -0.5
     window: int = 2
     max_spread: float = 6.0
     offset: float = 0.0
