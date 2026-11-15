@@ -37,6 +37,9 @@ DEFAULT_RUNS = [
 ]
 
 
+BEFORE_LIMIT = 15.0  # inches extrapolated before the first mark
+
+
 def frame_distances(folder):
     """Robot-center distance (inches) for each frame, or None where unknown."""
     folder = Path(folder)
@@ -54,9 +57,15 @@ def frame_distances(folder):
         for i in range(f0, min(f1, len(rows) - 1) + 1):
             distances[i] = d0 + (d1 - d0) * ((driving[i] - driving[f0]) / span if span else 0.0)
     first, d_first = marks[0]
+    # Before the first mark: parked frames are at it; frames driven toward it get
+    # distances from the run's own speed (inches per driving frame between marks),
+    # up to `BEFORE_LIMIT` inches back. Covers starts from the straight mat before.
+    (f_a, d_a), (f_b, d_b) = marks[0], marks[-1]
+    per_frame = (d_a - d_b) / max(1, driving[f_b] - driving[f_a])
     for i in range(first):
-        if driving[first] == driving[i]:
-            distances[i] = d_first
+        back = (driving[first] - driving[i]) * per_frame
+        if back <= BEFORE_LIMIT:
+            distances[i] = d_first + back
     last, d_last = marks[-1]
     for i in range(last, len(rows)):
         if driving[i] == driving[last]:

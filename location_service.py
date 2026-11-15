@@ -152,15 +152,20 @@ class LocationModel:
         self.max_cost = self._familiar_limit(data["run"] if "run" in data else None)
 
     def _familiar_limit(self, runs):
-        """99th percentile of each reference frame's cost against the OTHER runs."""
+        """Typical-run 99th percentile of frame cost against the OTHER runs.
+
+        Per run, then the median across runs: a run from a very different room
+        (Nov 15 lab vs Nov 12 room) matches the others badly and would otherwise
+        loosen the limit for everyone (2.6 -> 4.8).
+        """
         if runs is None or len(set(runs.tolist())) < 2:
             return 2.6
-        costs = []
+        per_run = {}
         for i in range(0, len(self.features), 3):
             other = self.features[runs != runs[i]]
             cost = np.abs(other - self.features[i]).sum(axis=1)
-            costs.append(np.sort(cost)[:self.neighbors].mean())
-        return float(max(2.0, np.percentile(costs, 99)))
+            per_run.setdefault(int(runs[i]), []).append(np.sort(cost)[:self.neighbors].mean())
+        return float(max(2.0, np.median([np.percentile(c, 99) for c in per_run.values()])))
 
     def estimate(self, vector):
         """(distance in inches, spread in inches, cost) - spread is the neighbors' disagreement."""
@@ -274,8 +279,9 @@ class LocationService:
     def process(self, frame_id, timestamp, front, side):
         distance, spread, cost = self.model.estimate(features(front, side))
         familiar = cost <= self.model.max_cost
-        if familiar and distance < 30 and cross_road_ahead(*front_sides(front)):
-            familiar = False  # the cross road is visibly still ahead: this estimate is wrong
+        # (A "cross road still ahead" veto was tried Nov 15 and removed: on tracks
+        # with several intersections the NEXT cross road is visible while the robot
+        # is at this one, and the veto discarded good estimates.)
         change = self.tracker.update(distance if familiar else None, spread)
         out = result(frame_id, timestamp, self.tracker, distance, spread, familiar, round(cost, 2))
         out["changed"] = change
