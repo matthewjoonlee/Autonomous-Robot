@@ -34,6 +34,8 @@ DEFAULT_RUNS = [
     # poorly (median error 2.2 in, 90% 11 in), so the lab needs its own run.
     # (four_way_stops_20261115_164039 is a false start: marks seconds apart.)
     "quiz3_recordings/four_way_stops_20261115_164159",
+    "quiz3_recordings/four_way_stops_20261115_164702",
+    "quiz3_recordings/four_way_stops_20261115_164828",
 ]
 
 
