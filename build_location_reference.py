@@ -30,6 +30,10 @@ DEFAULT_RUNS = [
     "quiz3_recordings/four_way_20261112_165907",
     "quiz3_recordings/four_way_20261112_170234",
     "quiz3_recordings/four_way_stops_20261112_170622",
+    # Nov 15, the brighter lab (front-edge marks + 7.1 in). The old runs predicted it
+    # poorly (median error 2.2 in, 90% 11 in), so the lab needs its own run.
+    # (four_way_stops_20261115_164039 is a false start: marks seconds apart.)
+    "quiz3_recordings/four_way_stops_20261115_164159",
 ]
 
 
