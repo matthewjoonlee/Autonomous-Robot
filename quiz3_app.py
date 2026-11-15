@@ -11,6 +11,10 @@ PS5 controller (touchscreen buttons do the same):
   Left stick reposition the robot between runs (not during a run)
   Options    quit
 
+Sign Reading: the robot stays still. Every sign the sign service (separate process,
+sign_service.py) reports steadily gets a box and label on the display and is
+announced once; showing a sign again after taking it away announces it again.
+
 Intersection run: the robot creeps forward holding its IMU heading. Every time the
 location service (separate process, location_service.py) reports a new phase, the
 robot stops, announces the phase, shows it on the display, and waits --pause-s for
@@ -36,6 +40,7 @@ import numpy as np
 from capture_quiz3 import HUNG, grab, open_side, read_heading, with_timeout
 from location_service import LABELS, PHASES, LocationWorker
 from record_quiz3 import CIRCLE, CROSS, SQUARE, TRIANGLE, Pad, drive_command, hold_turn, open_writer
+from sign_service import SPOKEN as SIGN_WORDS, SignWorker
 
 OPTIONS = 9
 MODE_TEXT = {"idle": "Choose a mode: Square = Intersection, Triangle = Sign Reading",
@@ -47,15 +52,17 @@ BUTTONS = [
     {"handle": "start", "text": "START", "bg_color": (40, 150, 70), "text_color": (255, 255, 255)},
     {"handle": "stop", "text": "STOP", "bg_color": (200, 60, 60), "text_color": (255, 255, 255)},
 ]
-EXTRA_PHRASES = ["Run complete", "Stopped", "Location lost. Stopping.", "Ready",
-                 "Sign reading is not ready yet"]
+EXTRA_PHRASES = ["Run complete", "Stopped", "Location lost. Stopping.", "Ready"]
 
 
 class App:
-    def __init__(self, args, display, pad, front, side, imu, saber, announcer, worker, recorder):
+    def __init__(self, args, display, pad, front, side, imu, saber, announcer, worker, recorder, signs):
         self.args, self.display, self.pad = args, display, pad
         self.front, self.side, self.imu, self.saber = front, side, imu, saber
         self.say, self.worker, self.recorder = announcer.say, worker, recorder
+        self.signs = signs
+        self.sign_result = None
+        self.sign_announced = None
         self.mode, self.state = "idle", "idle"
         self.quit = False
         self.frame_id = 0
@@ -98,6 +105,9 @@ class App:
             self.stop_run("Stopped")
         self.mode = mode
         self.state = "ready" if mode == "intersection" else "signs"
+        if mode == "sign":
+            self.signs.reset()
+            self.sign_result, self.sign_announced = None, None
         self.phase = None
         self.message = ("Press Cross to start" if mode == "intersection"
                         else "Show a sign to the front camera")
@@ -123,6 +133,23 @@ class App:
             self.message = reason
         self.state = "ready" if self.mode == "intersection" else self.state
         self.motors_stop()
+
+    def update_signs(self):
+        """Announce each new steady sign once; the robot never moves in this mode."""
+        result = self.signs.latest()
+        if result is None:
+            return
+        if "error" in result:
+            print("Sign worker error:", result["error"])
+            return
+        self.sign_result = result
+        label = result["label"]
+        if label != self.sign_announced:
+            self.sign_announced = label
+            if label is not None and self.mode == "sign":
+                self.say(SIGN_WORDS[label])
+                self.message = f"Sign: {SIGN_WORDS[label]}"
+                print(f"sign: {label}  box {result['box']}")
 
     def update_run(self, now):
         result = self.worker.latest()
@@ -234,6 +261,8 @@ class App:
         self.frame_id += 1
         if self.mode == "intersection" and self.frames["side"] is not None:
             self.worker.submit(self.frame_id, now, self.frames["front"], self.frames["side"])
+        if self.mode == "sign":
+            self.signs.submit(self.frame_id, now, self.frames["front"])
         if self.recorder:
             self.recorder.write(self, now)
 
@@ -242,7 +271,12 @@ class App:
         from annotations import draw, label
         front, side = self.frames["front"], self.frames["side"]
         canvas = np.zeros((400, 800, 3), dtype=np.uint8)
-        annotations = (self.result or {}).get("annotations", []) if self.mode == "intersection" else []
+        if self.mode == "intersection":
+            annotations = (self.result or {}).get("annotations", [])
+        elif self.mode == "sign":
+            annotations = (self.sign_result or {}).get("annotations", [])
+        else:
+            annotations = []
         if front is not None:
             canvas[0:281, 0:500] = cv2.resize(draw(front.copy(), annotations, "front"), (500, 281))
         if side is not None:
@@ -250,7 +284,8 @@ class App:
         label(canvas, "FRONT", (8, 275), (255, 255, 255), 0.5)
         label(canvas, "SIDE", (508, 220), (255, 255, 255), 0.5)
         mode = {"intersection": "INTERSECTION DETECTION", "sign": "SIGN READING"}.get(self.mode, "NO MODE")
-        label(canvas, mode, (508, 255), (0, 255, 255), 0.6)
+        if self.mode != "sign":  # Sign Reading has its own large label below
+            label(canvas, mode, (508, 255), (0, 255, 255), 0.6)
         if self.mode == "intersection":
             phase = LABELS[self.phase] if self.phase else "-"
             label(canvas, f"PHASE: {phase}", (10, 330), (0, 255, 0), 1.1)
@@ -258,6 +293,11 @@ class App:
             if loc and loc.get("distance_in") is not None:
                 label(canvas, f"location {loc['label']}  {loc['distance_in']:+.0f} in", (508, 285),
                       (255, 255, 255), 0.5)
+        if self.mode == "sign":
+            sign = (self.sign_result or {}).get("label")
+            label(canvas, f"SIGN: {SIGN_WORDS[sign].upper() if sign else '-'}", (10, 330),
+                  (0, 255, 0) if sign else (160, 160, 160), 1.3)
+            label(canvas, "SIGN READING", (508, 265), (0, 255, 255), 1.0)
         label(canvas, self.message, (10, 380), (255, 255, 255), 0.7)
         if self.heading is not None:
             label(canvas, f"heading {self.heading:+.1f}  motors {self.command[0]:+d}/{self.command[1]:+d}",
@@ -269,6 +309,7 @@ class App:
         while not self.quit:
             now = time.monotonic()
             self.handle_inputs(now)
+            self.update_signs()
             self.update_run(now)
             self.update_motors(now)
             if now >= next_frame:
@@ -328,7 +369,7 @@ def main(argv=None):
     if not 0 <= args.speed <= 40 or not 0 <= args.max_turn <= 40:
         parser.error("--speed and --max-turn must be 0-40")
 
-    front = side = imu = saber = pad = display = announcer = worker = recorder = None
+    front = side = imu = saber = pad = display = announcer = worker = recorder = signs = None
     started = []
     previous = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)}
 
@@ -348,10 +389,12 @@ def main(argv=None):
         from display import RobotDisplay
 
         worker = LocationWorker()  # start early: loading in the other process overlaps setup
+        signs = SignWorker()
         display = RobotDisplay(fullscreen=not args.windowed, fps=30, size=(800, 480), bg_color=(0, 0, 0))
         display.set_status("Starting...", position="top", bg_color=(0, 0, 0), text_color=(255, 255, 255))
         display.set_buttons(BUTTONS, position="bottom")
-        announcer = Announcer(list(LABELS.values()) + list(SPOKEN_MODE.values()) + EXTRA_PHRASES,
+        announcer = Announcer(list(LABELS.values()) + list(SPOKEN_MODE.values()) + EXTRA_PHRASES
+                              + list(SIGN_WORDS.values()),
                               volume=args.volume)
         try:
             pad = Pad(wait_s=20)
@@ -390,7 +433,7 @@ def main(argv=None):
         display.set_status(MODE_TEXT["idle"], position="top", bg_color=(0, 0, 0), text_color=(255, 255, 255))
         announcer.say("Ready")
         print("Ready." + ("" if saber else " Motors are OFF (add --execute)."))
-        App(args, display, pad, front, side, imu, saber, announcer, worker, recorder).run()
+        App(args, display, pad, front, side, imu, saber, announcer, worker, recorder, signs).run()
     except KeyboardInterrupt:
         print("\nStopping.")
     except Exception as exc:
@@ -417,7 +460,7 @@ def main(argv=None):
                 with_timeout(imu.close, 5)
             except Exception:
                 pass
-        for closer in (worker, display):
+        for closer in (worker, signs, display):
             if closer is not None:
                 try:
                     closer.close()
