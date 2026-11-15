@@ -6,7 +6,8 @@
 PS5 controller (touchscreen buttons do the same):
   Square     Intersection Detection mode
   Triangle   Sign Reading mode
-  Cross      start the intersection run (robot drives forward by itself)
+  Cross      start the intersection run (robot drives forward by itself);
+             press Cross again during the run to end it ("Run complete")
   Circle     stop: motors stop, run ends (press again to clear)
   Left stick reposition the robot between runs (not during a run)
   Options    quit
@@ -32,8 +33,9 @@ is not visible (cross road filling the view) and from the pause zone on, it hold
 the track direction with the IMU. Every time the
 location service (separate process, location_service.py) reports a new phase, the
 robot stops, announces the phase, shows it on the display, and waits --pause-s for
-the judges, then continues. After "Continue travel" it drives --finish-s more and
-stops. It stops on its own if location results stop arriving, the heading turns
+the judges, then continues. After "Continue travel" it keeps driving until you press
+Cross again ("Run complete"); --finish-s N stops it after N seconds instead. Circle
+stops at any time. It stops on its own if location results stop arriving, the heading turns
 more than --max-heading degrees, or --max-run-s passes. The controller makes every
 decision; the workers only report what they see.
 
@@ -135,7 +137,10 @@ class App:
         if TRIANGLE in pressed or "sign" in events:
             self.set_mode("sign")
         if CROSS in pressed or "start" in events:
-            self.start_run(now)
+            if self.state in ("driving", "judging", "finishing"):
+                self.end_run()          # Cross again during a run: finish it
+            else:
+                self.start_run(now)
         if CIRCLE in pressed or "stop" in events:
             self.stop_run("Stopped")
         if OPTIONS in pressed:
@@ -183,7 +188,11 @@ class App:
         from lane_center import image_yaw, reference
         from quiz3_autonomous import Controller, Settings
         from track_vision import detect_lane
-        settings = replace(Settings(), speed=self.args.speed, lost_limit=1e9)
+        # Gentler than quiz3_autonomous: the first lane reading far from the intersection
+        # (cross road in view) swung the robot ~8 deg right at the start (Nov 15 lab).
+        settings = replace(Settings(), speed=self.args.speed, lost_limit=1e9,
+                           max_target_heading=self.args.lane_max_angle,
+                           position_gain=self.args.lane_gain)
         yaws = []
         for frame, heading in self.recent:
             detection = detect_lane(legacy_view(frame))
@@ -304,16 +313,26 @@ class App:
             if self.pending:
                 self.begin_phase(self.pending.pop(0), now)
             elif self.phase == PHASES[-1]:
-                self.state, self.until = "finishing", now + self.args.finish_s
+                # Keep driving after Continue travel until Cross ends the run
+                # (or --finish-s, if given, runs out).
+                self.state = "finishing"
+                self.until = now + self.args.finish_s if self.args.finish_s > 0 else float("inf")
                 self.result_time = now
+                self.message = "Continue travel - press Cross to end the run"
             else:
                 self.state = "driving"
                 self.result_time = now
         elif self.state == "finishing" and now >= self.until:
-            self.state = "ready"
-            self.motors_stop()
-            self.say("Run complete")
-            self.message = "Run complete - Cross to run again"
+            self.end_run()
+        elif self.state == "finishing" and now - self.run_start > self.args.max_run_s:
+            self.stop_run("Stopped")
+
+    def end_run(self):
+        """Normal end of a run (Cross pressed again, or --finish-s ran out)."""
+        self.state = "ready"
+        self.motors_stop()
+        self.say("Run complete")
+        self.message = "Run complete - Cross to run again"
 
     def begin_phase(self, index, now):
         self.phase = PHASES[index]
@@ -506,6 +525,10 @@ def main(argv=None):
     parser.add_argument("--speed", type=int, default=22, help="forward speed during the run")
     parser.add_argument("--max-turn", type=int, default=15)
     parser.add_argument("--no-lane", action="store_true", help="heading hold only, no lane centering")
+    parser.add_argument("--lane-max-angle", type=float, default=6.0,
+                        help="largest heading lane centering may aim for, degrees (quiz3_autonomous: 12)")
+    parser.add_argument("--lane-gain", type=float, default=60.0,
+                        help="degrees of target heading per unit lateral error (quiz3_autonomous: 90)")
     parser.add_argument("--camera-zones", action="store_true",
                         help="use camera estimates for every zone (no driving-distance after Read the sign)")
     parser.add_argument("--drive-speed", type=float, default=4.0,
@@ -524,11 +547,12 @@ def main(argv=None):
                         help="measured distance from the center tape mark (used in the calibration "
                              "recordings) to the front edge, inches; overrides half the body length")
     parser.add_argument("--pause-s", type=float, default=1.5, help="judging pause at each phase")
-    parser.add_argument("--finish-s", type=float, default=1.5, help="drive after Continue travel")
+    parser.add_argument("--finish-s", type=float, default=0.0,
+                        help="seconds to drive after Continue travel (0 = until Cross is pressed)")
     parser.add_argument("--lost-s", type=float, default=2.0, help="stop if no location for this long")
     parser.add_argument("--unfamiliar-s", type=float, default=10.0,
                         help="stop if the views match no reference frame for this long (~40 in)")
-    parser.add_argument("--max-run-s", type=float, default=60.0)
+    parser.add_argument("--max-run-s", type=float, default=120.0, help="safety stop")
     parser.add_argument("--max-heading", type=float, default=30.0)
     parser.add_argument("--fps", type=float, default=10.0)
     parser.add_argument("--volume", type=float, default=1.0)
