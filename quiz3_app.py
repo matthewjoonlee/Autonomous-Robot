@@ -277,6 +277,10 @@ class App:
 
     def begin_phase(self, index, now):
         self.phase = PHASES[index]
+        if self.phase == "approach":
+            # Before the sign-reading area is not a judged zone: keep driving quietly.
+            self.message = "Approaching"
+            return
         self.state, self.until = "judging", now + self.args.pause_s
         self.motors_stop()
         self.say(LABELS[self.phase])
@@ -379,7 +383,8 @@ class App:
         if self.mode != "sign":  # Sign Reading has its own large label below
             label(canvas, mode, (508, 255), (0, 255, 255), 0.6)
         if self.mode == "intersection":
-            phase = LABELS[self.phase] if self.phase else "-"
+            phase = ("Approaching" if self.phase == "approach"
+                     else LABELS[self.phase] if self.phase else "-")
             label(canvas, f"PHASE: {phase}", (10, 330), (0, 255, 0), 1.1)
             if self.lane_status and self.lane is not None:
                 label(canvas, self.lane_status, (508, 330), (200, 200, 255), 0.4)
