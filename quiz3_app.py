@@ -451,10 +451,12 @@ def main(argv=None):
     parser.add_argument("--speed", type=int, default=22, help="forward speed during the run")
     parser.add_argument("--max-turn", type=int, default=15)
     parser.add_argument("--no-lane", action="store_true", help="heading hold only, no lane centering")
-    parser.add_argument("--zone-ref", choices=("center", "front"), default="center",
-                        help="which point of the robot the zones are judged by")
-    parser.add_argument("--robot-length-in", type=float, default=None,
-                        help="front-to-back length; needed with --zone-ref front")
+    parser.add_argument("--zone-ref", choices=("center", "front"), default="front",
+                        help="which point of the robot the zones are judged by (default front)")
+    # Body 36 cm (wheels stick out 2 cm more at the back; the front is what matters).
+    # The calibration recordings marked the middle of the body, 18 cm behind the front.
+    parser.add_argument("--robot-length-in", type=float, default=36 / 2.54,
+                        help="body length front to back, inches (default 36 cm)")
     parser.add_argument("--pause-s", type=float, default=1.5, help="judging pause at each phase")
     parser.add_argument("--finish-s", type=float, default=1.5, help="drive after Continue travel")
     parser.add_argument("--lost-s", type=float, default=2.0, help="stop if no location for this long")
