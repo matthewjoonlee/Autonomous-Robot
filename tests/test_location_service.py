@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from build_location_reference import frame_distances
-from location_service import PHASES, ZoneTracker, zone_index
+from location_service import PHASES, PositionFuser, ZoneTracker, zone_index
 
 
 class ZoneIndexTest(unittest.TestCase):
@@ -101,3 +101,44 @@ class BackwardJumpTest(unittest.TestCase):
         for v in [30, 30, 30]:
             tracker.update(v, 0.0)
         self.assertGreater(tracker.smoothed, 25)
+
+
+class PositionFuserTest(unittest.TestCase):
+    def drive(self, fuser, readings, speed=4.0, dt=0.1):
+        t = 0.0
+        for reading in readings:
+            t += dt
+            fuser.observe(reading if not callable(reading) else reading(t), t)
+        return fuser.position(t), t
+
+    def test_tracks_driving_and_ignores_misreads(self):
+        fuser = PositionFuser()
+        truth = lambda t: 40 - 4.0 * t
+        readings = [truth] * 30 + [lambda t: 45.0] * 3 + [truth] * 20   # 3 misreads
+        x, t = self.drive(fuser, readings)
+        self.assertAlmostEqual(x, 40 - 4.0 * t, delta=1.0)
+
+    def test_bad_start_is_corrected_by_agreeing_readings(self):
+        fuser = PositionFuser()
+        x, t = self.drive(fuser, [10.0] * 5)          # starts believing +10
+        x, t2 = self.drive(fuser, [35.0] * 8)        # cameras consistently say +35
+        self.assertGreater(fuser.position(t2), 25)
+
+    def test_close_in_uses_driving_distance_only(self):
+        fuser = PositionFuser(camera_until=20)
+        for _ in range(5):
+            fuser.observe(30.0, 0.0)                 # starts at +30
+        before = fuser.position(4.0)                 # 30 - 4 x 4 = 14, inside 20 in
+        for _ in range(8):
+            fuser.observe(40.0, 4.0)                 # misreads near the intersection: ignored
+        self.assertAlmostEqual(fuser.position(4.0), before)
+        self.assertAlmostEqual(before, 14.0, delta=0.01)
+
+    def test_close_first_readings_do_not_start_it(self):
+        fuser = PositionFuser()
+        for _ in range(5):
+            fuser.observe(10.0, 0.5)                 # stuck close value at the start
+        self.assertIsNone(fuser.position(0.5))
+        for _ in range(5):
+            fuser.observe(10.0, 3.5)                 # still only close after 3 s of driving
+        self.assertIsNotNone(fuser.position(3.5))

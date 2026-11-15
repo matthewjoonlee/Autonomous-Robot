@@ -392,3 +392,107 @@ class LocationWorker:
         # An unread frame left in a queue would otherwise block Python from exiting.
         for q in (self.jobs, self.results, self.control):
             q.cancel_join_thread()
+
+
+# ---------------------------------------------------------------- fused position
+
+class PositionFuser:
+    """Robot FRONT position (inches) from driving distance, corrected by camera readings.
+
+    Nov 15 lab: far out (front > ~20 in) the camera estimates tracked the robot to
+    about an inch, but near the intersection they misread (+40 for the next
+    intersection) or stuck at calibration-stop values. Driving distance (speed x time
+    the motors drive) is smooth but drifts when the robot is slowed or blocked (one
+    run "drove" 9 in while barely moving). So:
+
+    - the position always advances by speed x driving time (stops do not count);
+    - while the position is beyond `camera_until`, each camera reading within `gate`
+      inches nudges it by `gain`; readings outside the gate are ignored, unless
+      `reinit_n` in a row agree with each other - then the position jumps to them
+      (bad start, or the robot did not move as commanded);
+    - with `measure_speed`, the speed is re-measured from the accepted camera readings
+      (robust slope over the last few seconds); off by default because those
+      readings gave 3.5-4.5 in/s run to run, while 4.0 matched the calibration
+      passes (0.38-0.42 in per frame at 10 fps) and the best test run;
+    - the first position is the median of the first `init_n` readings at or beyond
+      `camera_until` (the robot starts on the approach; a first reading stuck at a
+      close calibration-stop value would otherwise lock in, since close-in readings
+      are not used for corrections). Close readings start it only after
+      `init_timeout` seconds of driving without far ones (a genuinely close start).
+    """
+
+    def __init__(self, speed=4.0, gain=0.25, gate=5.0, reinit_n=6, camera_until=20.0,
+                 init_n=5, speed_window=4.0, speed_limits=(2.5, 6.0), measure_speed=False,
+                 init_timeout=3.0):
+        self.speed, self.default_speed = speed, speed
+        self.gain, self.gate, self.reinit_n = gain, gate, reinit_n
+        self.camera_until, self.init_n = camera_until, init_n
+        self.speed_window, self.speed_limits = speed_window, speed_limits
+        self.measure_speed = measure_speed
+        self.x = None          # front position at drive time self.t
+        self.t = 0.0
+        self.pending = []      # far readings before the first position
+        self.pending_close = []
+        self.init_timeout = init_timeout
+        self.outliers = []
+        self.accepted = []     # (drive time, reading) used to measure speed
+
+    def position(self, drive_time):
+        """Front position now (advances by speed x driving time since the last update)."""
+        if self.x is None:
+            return None
+        self.x -= self.speed * max(0.0, drive_time - self.t)
+        self.t = max(self.t, drive_time)
+        return self.x
+
+    def observe(self, reading, drive_time):
+        """Feed one camera front reading (None = no usable reading)."""
+        x = self.position(drive_time)
+        if reading is None:
+            return x
+        if x is None:
+            if reading >= self.camera_until:
+                self.pending.append((drive_time, reading))
+                source = self.pending
+            else:
+                self.pending_close.append((drive_time, reading))
+                source = self.pending_close if drive_time >= self.init_timeout else []
+            if len(source) >= self.init_n:
+                times, values = zip(*source[-self.init_n:])
+                self.x = float(np.median(values)) - self.speed * (drive_time - float(np.mean(times)))
+                self.t = drive_time
+                self.accepted = list(source[-self.init_n:])
+                self.pending, self.pending_close = [], []
+            return self.x
+        if x < self.camera_until:
+            return x
+        if abs(reading - x) <= self.gate:
+            self.x += self.gain * (reading - x)
+            self.outliers = []
+            self.accepted.append((drive_time, reading))
+            if self.measure_speed:
+                self._measure_speed(drive_time)
+        else:
+            self.outliers.append(reading)
+            recent = self.outliers[-self.reinit_n:]
+            if len(recent) == self.reinit_n and max(recent) - min(recent) < self.gate:
+                self.x = float(np.median(recent))
+                self.outliers, self.accepted = [], [(drive_time, self.x)]
+        return self.x
+
+    def _measure_speed(self, now):
+        points = [(t, v) for t, v in self.accepted if t >= now - self.speed_window]
+        times = np.array([t for t, _ in points])
+        if len(points) < 10 or np.ptp(times) < 1.5:
+            return
+        values = np.array([v for _, v in points])
+        # Theil-Sen: median of pairwise slopes, robust to the odd misread.
+        i, j = np.triu_indices(len(points), 1)
+        dt = times[j] - times[i]
+        keep = dt > 0.3
+        if keep.sum() < 10:
+            return
+        slope = -float(np.median((values[j] - values[i])[keep] / dt[keep]))
+        low, high = self.speed_limits
+        if low <= slope <= high:
+            self.speed = slope
