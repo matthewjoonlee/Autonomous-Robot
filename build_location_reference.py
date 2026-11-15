@@ -2,6 +2,11 @@
 
     python build_location_reference.py                 # the default recordings below
     python build_location_reference.py --check         # also leave-one-run-out accuracy
+    python build_location_reference.py --add-latest --check
+        # new room: the default runs plus your newest stop-style recording
+
+A recording made in the quiz room teaches the service that room's lighting; the
+leave-one-run-out check then shows how well the other rooms' runs predicted it.
 
 Each recording (record_quiz3.py) has front.mp4, side.mp4, frames.csv and marks.csv.
 Frames get robot-center distances by interpolating between marks in proportion to
@@ -108,12 +113,36 @@ def check(datasets, names, neighbors=5):
                       f"(boundary {BOUNDARIES[z - 1]:+.1f})")
 
 
+def newest_marked_recording():
+    """Newest quiz3_recordings/* folder whose marks.csv has two or more distances."""
+    folders = sorted((ROOT / "quiz3_recordings").glob("*/marks.csv"),
+                     key=lambda p: p.stat().st_mtime, reverse=True)
+    for marks in folders:
+        rows = [r for r in csv.DictReader(marks.open()) if r.get("distance_in")]
+        if len(rows) >= 2 and (marks.parent / "front.mp4").exists():
+            return str(marks.parent.relative_to(ROOT))
+    return None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("runs", nargs="*", default=DEFAULT_RUNS)
+    parser.add_argument("runs", nargs="*", default=None, help="recordings (default: the Nov 12 runs)")
+    parser.add_argument("--add", nargs="+", default=[], metavar="RUN",
+                        help="recordings to use in addition to the defaults")
+    parser.add_argument("--add-latest", action="store_true",
+                        help="also use the newest quiz3_recordings folder with distance marks")
     parser.add_argument("--output", type=Path, default=REFERENCE)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
+    runs = list(args.runs or DEFAULT_RUNS) + list(args.add)
+    if args.add_latest:
+        latest = newest_marked_recording()
+        if latest is None:
+            parser.error("no recording in quiz3_recordings/ has two or more distance marks")
+        if latest not in runs:
+            runs.append(latest)
+        print(f"Adding newest recording: {latest}")
+    args.runs = runs
     datasets = [run_dataset(run) for run in args.runs]
     X = np.vstack([d[0] for d in datasets])
     Y = np.hstack([d[1] for d in datasets])
