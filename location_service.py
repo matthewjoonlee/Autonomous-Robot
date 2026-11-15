@@ -17,8 +17,10 @@ How it works
 - Zones: ZoneTracker smooths the estimates and steps through the phases in order,
   never backwards and never skipping one, so every phase is reported once.
 
-Zone boundaries (robot center, inches; + before the cross-road center line):
-  approach > 24 > read_sign > 12 > pause > 6 > entering > 1.5 > turn > -1.5 > exiting > -6 > continue
+Zone boundaries (inches; + before the cross-road center line; see BOUNDARIES):
+  approach > 25.2 > read_sign > 10.1 > pause > 6 > entering > 1.5 > turn > -1.5 > exiting > -6.1 > continue
+Zones are judged at the robot center unless ZoneTracker.offset moves the point
+forward (quiz3_app --zone-ref front).
 """
 
 from dataclasses import dataclass, field
@@ -38,7 +40,10 @@ LABELS = {
     "exiting": "Exiting intersection",
     "continue": "Continue travel",
 }
-BOUNDARIES = (24.0, 12.0, 6.0, 1.5, -1.5, -6.0)  # between consecutive PHASES
+# Between consecutive PHASES, inches from the cross-road center line (+ before it).
+# Nov 15: scaled from the Week 10 zone diagram onto the course mat (59 in road
+# length; cross-road center ~29.25 in from the bottom edge).
+BOUNDARIES = (25.2, 10.1, 6.0, 1.5, -1.5, -6.1)
 
 FRONT_BANDS = 12
 SIDE_STRIPS = 8
@@ -185,7 +190,7 @@ class ZoneTracker:
     distance - offset.
     """
     confirm: int = 2
-    margin: float = 0.3
+    margin: float = 0.8   # inches past a boundary before reporting it (read_sign came 0.7 in early at 0.3)
     window: int = 2
     max_spread: float = 6.0
     offset: float = 0.0

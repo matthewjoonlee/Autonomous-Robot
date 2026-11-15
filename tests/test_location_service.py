@@ -9,9 +9,9 @@ from location_service import PHASES, ZoneTracker, zone_index
 
 class ZoneIndexTest(unittest.TestCase):
     def test_boundaries(self):
-        cases = {30: "approach", 24.1: "approach", 23.9: "read_sign", 12.1: "read_sign",
-                 11.9: "pause", 6.1: "pause", 5.9: "entering", 1.6: "entering",
-                 1.4: "turn", -1.4: "turn", -1.6: "exiting", -5.9: "exiting", -6.1: "continue"}
+        cases = {30: "approach", 25.3: "approach", 25.1: "read_sign", 10.2: "read_sign",
+                 10.0: "pause", 6.1: "pause", 5.9: "entering", 1.6: "entering",
+                 1.4: "turn", -1.4: "turn", -1.6: "exiting", -6.0: "exiting", -6.2: "continue"}
         for distance, phase in cases.items():
             self.assertEqual(PHASES[zone_index(distance)], phase, distance)
 
