@@ -1,0 +1,13 @@
+{
+  "offset_far_ratio": 0.6,
+  "rotation_far_ratio": 0.91,
+  "notes": "Centered lane position for quiz3_app (full camera view, middle cut out as the old 640x480 lane view). Measured Nov 15 from the three lab calibration passes, driven centered on the yellow line; lane_center.json (Oct, old view) put the robot ~50-60 px right of the line. offset/rotation ratios copied from lane_center.json.",
+  "width": 640,
+  "near_x": 0.7182,
+  "far_x": 0.6623,
+  "center_images": [
+    "quiz3_recordings/four_way_stops_20261115_164159 (frames +16..+34 in, lane tracked)",
+    "quiz3_recordings/four_way_stops_20261115_164702 (frames +16..+34 in, lane tracked)",
+    "quiz3_recordings/four_way_stops_20261115_164828 (frames +16..+34 in, lane tracked)"
+  ]
+}

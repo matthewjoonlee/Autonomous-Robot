@@ -93,8 +93,12 @@ class App:
         self.lane = None             # quiz3_autonomous.Controller during a run
         self.lane_calibration = None
         if not args.no_lane:
+            from pathlib import Path
             from lane_center import load
-            self.lane_calibration = load()
+            # Centered lane position measured in the full camera view (Nov 15 lab);
+            # the Oct lane_center.json held the robot ~50-60 px right of the line.
+            full = Path(__file__).resolve().parent / "lane_center_full.json"
+            self.lane_calibration = load(full) if full.exists() else load()
         self.track_zero = None       # app heading that points along the track
         self.lane_command = None
         self.lane_status = ""
@@ -531,11 +535,12 @@ def main(argv=None):
                         help="degrees of target heading per unit lateral error (quiz3_autonomous: 90)")
     parser.add_argument("--camera-zones", action="store_true",
                         help="use camera estimates for every zone (no driving-distance after Read the sign)")
-    parser.add_argument("--drive-speed", type=float, default=4.0,
-                        help="forward speed in in/s used for driving distance (Nov 15 lab: 4.0)")
+    parser.add_argument("--drive-speed", type=float, default=4.3,
+                        help="forward speed in in/s used for driving distance (calibration passes "
+                             "4.0; raised after zones came later and later on Nov 15 test runs)")
     parser.add_argument("--measure-speed", action="store_true",
                         help="re-measure the speed from camera readings on the approach")
-    parser.add_argument("--zone-lead", type=float, default=0.3,
+    parser.add_argument("--zone-lead", type=float, default=0.8,
                         help="announce this many inches before each line (speaking/stopping delay)")
     parser.add_argument("--zone-ref", choices=("center", "front"), default="front",
                         help="which point of the robot the zones are judged by (default front)")
