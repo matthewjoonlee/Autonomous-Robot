@@ -457,6 +457,9 @@ def main(argv=None):
     # The calibration recordings marked the middle of the body, 18 cm behind the front.
     parser.add_argument("--robot-length-in", type=float, default=36 / 2.54,
                         help="body length front to back, inches (default 36 cm)")
+    parser.add_argument("--front-offset-in", type=float, default=None,
+                        help="measured distance from the center tape mark (used in the calibration "
+                             "recordings) to the front edge, inches; overrides half the body length")
     parser.add_argument("--pause-s", type=float, default=1.5, help="judging pause at each phase")
     parser.add_argument("--finish-s", type=float, default=1.5, help="drive after Continue travel")
     parser.add_argument("--lost-s", type=float, default=2.0, help="stop if no location for this long")
@@ -473,6 +476,8 @@ def main(argv=None):
         parser.error("--speed and --max-turn must be 0-40")
     if args.zone_ref == "front" and not (args.robot_length_in and 4 <= args.robot_length_in <= 30):
         parser.error("--zone-ref front needs --robot-length-in (front bumper to back, 4-30 in)")
+    if args.front_offset_in is not None and not 0 <= args.front_offset_in <= 20:
+        parser.error("--front-offset-in must be 0-20 inches")
 
     front = side = imu = saber = pad = display = announcer = worker = recorder = signs = None
     started = []
@@ -493,7 +498,12 @@ def main(argv=None):
         from capture_side_camera import choose_side
         from display import RobotDisplay
 
-        offset = args.robot_length_in / 2 if args.zone_ref == "front" else 0.0
+        if args.zone_ref == "center":
+            offset = 0.0
+        elif args.front_offset_in is not None:
+            offset = args.front_offset_in
+        else:
+            offset = args.robot_length_in / 2
         print(f"Zones judged at the robot's {args.zone_ref}"
               + (f" ({offset:.1f} in ahead of center)" if offset else ""))
         worker = LocationWorker(offset=offset)  # start early: loading overlaps setup
