@@ -172,9 +172,16 @@ def _symbols(frame, hsv):
             found.append(("PAUSE", box, solidity, f"hexagon solidity {solidity:.2f}, {corners} corners",
                           None))
     bright = float(np.percentile(val, 90))
-    dark = (val < min(100.0, 0.5 * bright)).astype(np.uint8)
-    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    for contour in _outer_contours(dark):
+    # The arrow is not always black to the camera: next to a white panel bright
+    # enough to clip (~250), a green-walled room showed it at ~100-120 (Nov 15), and
+    # the old single cutoff (~92) missed it. Try several cutoffs relative to the
+    # scene; the white-panel checks in detect_sign reject what is not a sign.
+    contours = []
+    for fraction, cap in ((0.5, 100.0), (0.62, 125.0), (0.72, 145.0)):
+        dark = (val < min(cap, fraction * bright)).astype(np.uint8)
+        dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        contours.extend(_outer_contours(dark))
+    for contour in contours:
         area, box, solidity, corners = _shape(contour)
         x, y, w, h = box
         long_side, short_side = max(w, h), min(w, h)
