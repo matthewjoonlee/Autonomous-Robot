@@ -46,6 +46,7 @@ LABELS = {
 BOUNDARIES = (25.2, 10.1, 6.0, 1.5, -1.5, -6.1)
 
 FRONT_BANDS = 12
+FAMILIAR_FACTOR = 2.0   # views up to this x the typical cross-run match cost are trusted
 SIDE_STRIPS = 8
 
 
@@ -165,7 +166,10 @@ class LocationModel:
             other = self.features[runs != runs[i]]
             cost = np.abs(other - self.features[i]).sum(axis=1)
             per_run.setdefault(int(runs[i]), []).append(np.sort(cost)[:self.neighbors].mean())
-        return float(max(2.0, np.median([np.percentile(c, 99) for c in per_run.values()])))
+        typical = float(np.median([np.percentile(c, 99) for c in per_run.values()]))
+        # x2: in a calibrated room, correct estimates scored 2.5-4.5 against the
+        # 2.4 limit and were thrown away, delaying every zone (Nov 15 lab test run).
+        return max(2.0, FAMILIAR_FACTOR * typical)
 
     def estimate(self, vector):
         """(distance in inches, spread in inches, cost) - spread is the neighbors' disagreement."""
