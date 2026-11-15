@@ -207,6 +207,13 @@ class ZoneTracker:
     window: int = 2
     max_spread: float = 6.0
     offset: float = 0.0
+    # The robot only drives forward, so an estimate this many inches FARTHER than the
+    # recent ones is a misread (lab, Nov 15: the next intersection down the track made
+    # frames at +10 read as +40, stalling Entering by 4 in). Accepted only if
+    # `backward_confirm` such readings in a row agree (the robot really was moved back).
+    max_backward: float = 6.0
+    backward_confirm: int = 3
+    backward: list = field(default_factory=list)
     zone: int = -1               # -1 until the first confident estimates
     recent: list = field(default_factory=list)
     streak: int = 0
@@ -215,6 +222,14 @@ class ZoneTracker:
         """Feed one estimate; returns the new phase name if the zone changed, else None."""
         if distance is None or spread > self.max_spread:
             return None
+        if self.recent and distance > max(self.recent) + self.max_backward:
+            self.backward = (self.backward + [distance])[-self.backward_confirm:]
+            consistent = (len(self.backward) == self.backward_confirm
+                          and max(self.backward) - min(self.backward) < self.max_backward)
+            if not consistent:
+                return None
+            self.recent = []          # the robot really moved back: start smoothing over
+        self.backward = []
         self.recent = (self.recent + [distance])[-self.window:]
         smoothed = float(np.median(self.recent)) - self.offset
         if self.zone < 0:
@@ -280,9 +295,10 @@ class LocationService:
         self.tracker = ZoneTracker(**tracker_settings)
 
     def reset(self):
-        self.tracker = ZoneTracker(confirm=self.tracker.confirm, margin=self.tracker.margin,
-                                   window=self.tracker.window, max_spread=self.tracker.max_spread,
-                                   offset=self.tracker.offset)
+        t = self.tracker
+        self.tracker = ZoneTracker(confirm=t.confirm, margin=t.margin, window=t.window,
+                                   max_spread=t.max_spread, offset=t.offset,
+                                   max_backward=t.max_backward, backward_confirm=t.backward_confirm)
 
     def process(self, frame_id, timestamp, front, side):
         distance, spread, cost = self.model.estimate(features(front, side))

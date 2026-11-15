@@ -84,3 +84,20 @@ class ZoneOffsetTest(unittest.TestCase):
                     seen.setdefault(change, values[i])
         # The front reaches the turn zone when the center is still ~5 in before it.
         self.assertAlmostEqual(seen_front["turn"] - seen_center["turn"], 5.0, delta=0.6)
+
+
+class BackwardJumpTest(unittest.TestCase):
+    def test_single_far_misreads_are_ignored(self):
+        tracker = ZoneTracker()
+        values = [14, 14, 13, 12, 40, 11.5, 40, 40, 11, 10.5, 10, 9.5, 40, 9, 8.5, 8]
+        changes = [c for c in (tracker.update(v, 0.0) for v in values) if c]
+        self.assertEqual(changes, ["read_sign", "pause"])
+        self.assertLess(tracker.smoothed, 10)
+
+    def test_robot_really_moved_back_is_accepted_after_agreement(self):
+        tracker = ZoneTracker()
+        for v in [14, 14, 13]:
+            tracker.update(v, 0.0)
+        for v in [30, 30, 30]:
+            tracker.update(v, 0.0)
+        self.assertGreater(tracker.smoothed, 25)
