@@ -451,6 +451,10 @@ def main(argv=None):
     parser.add_argument("--speed", type=int, default=22, help="forward speed during the run")
     parser.add_argument("--max-turn", type=int, default=15)
     parser.add_argument("--no-lane", action="store_true", help="heading hold only, no lane centering")
+    parser.add_argument("--zone-ref", choices=("center", "front"), default="center",
+                        help="which point of the robot the zones are judged by")
+    parser.add_argument("--robot-length-in", type=float, default=None,
+                        help="front-to-back length; needed with --zone-ref front")
     parser.add_argument("--pause-s", type=float, default=1.5, help="judging pause at each phase")
     parser.add_argument("--finish-s", type=float, default=1.5, help="drive after Continue travel")
     parser.add_argument("--lost-s", type=float, default=2.0, help="stop if no location for this long")
@@ -465,6 +469,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 0 <= args.speed <= 40 or not 0 <= args.max_turn <= 40:
         parser.error("--speed and --max-turn must be 0-40")
+    if args.zone_ref == "front" and not (args.robot_length_in and 4 <= args.robot_length_in <= 30):
+        parser.error("--zone-ref front needs --robot-length-in (front bumper to back, 4-30 in)")
 
     front = side = imu = saber = pad = display = announcer = worker = recorder = signs = None
     started = []
@@ -485,7 +491,10 @@ def main(argv=None):
         from capture_side_camera import choose_side
         from display import RobotDisplay
 
-        worker = LocationWorker()  # start early: loading in the other process overlaps setup
+        offset = args.robot_length_in / 2 if args.zone_ref == "front" else 0.0
+        print(f"Zones judged at the robot's {args.zone_ref}"
+              + (f" ({offset:.1f} in ahead of center)" if offset else ""))
+        worker = LocationWorker(offset=offset)  # start early: loading overlaps setup
         signs = SignWorker()
         display = RobotDisplay(fullscreen=not args.windowed, fps=30, size=(800, 480), bg_color=(0, 0, 0))
         display.set_status("Starting...", position="top", bg_color=(0, 0, 0), text_color=(255, 255, 255))

@@ -178,11 +178,17 @@ class ZoneTracker:
     the robot moves quickly) after `confirm` consecutive smoothed estimates are past
     the boundary by `margin` inches. Estimates whose neighbors disagree by more than
     `max_spread` inches are ignored.
+
+    `offset`: how far the point judged for zones sits ahead of the robot center
+    (inches). 0 = robot center; half the robot length = its front edge. Estimates
+    are of the center (the recordings marked the center), so zones use
+    distance - offset.
     """
     confirm: int = 2
     margin: float = 0.3
     window: int = 2
     max_spread: float = 6.0
+    offset: float = 0.0
     zone: int = -1               # -1 until the first confident estimates
     recent: list = field(default_factory=list)
     streak: int = 0
@@ -192,7 +198,7 @@ class ZoneTracker:
         if distance is None or spread > self.max_spread:
             return None
         self.recent = (self.recent + [distance])[-self.window:]
-        smoothed = float(np.median(self.recent))
+        smoothed = float(np.median(self.recent)) - self.offset
         if self.zone < 0:
             if len(self.recent) < self.window:
                 return None
@@ -257,7 +263,8 @@ class LocationService:
 
     def reset(self):
         self.tracker = ZoneTracker(confirm=self.tracker.confirm, margin=self.tracker.margin,
-                                   window=self.tracker.window, max_spread=self.tracker.max_spread)
+                                   window=self.tracker.window, max_spread=self.tracker.max_spread,
+                                   offset=self.tracker.offset)
 
     def process(self, frame_id, timestamp, front, side):
         distance, spread, cost = self.model.estimate(features(front, side))
@@ -288,9 +295,9 @@ def _put_latest(q, item):
             pass
 
 
-def _worker_main(jobs, results, control, path):
+def _worker_main(jobs, results, control, path, offset=0.0):
     import queue
-    service = LocationService(path)
+    service = LocationService(path, offset=offset)
     while True:
         try:
             while True:  # control messages first, so a reset is never lost
@@ -319,14 +326,14 @@ class LocationWorker:
     newest result, or None if nothing new. The worker never touches motors.
     """
 
-    def __init__(self, path=REFERENCE):
+    def __init__(self, path=REFERENCE, offset=0.0):
         import multiprocessing as mp
         context = mp.get_context("spawn")  # do not inherit camera/motor handles
         self.jobs = context.Queue(maxsize=1)
         self.results = context.Queue(maxsize=1)
         self.control = context.Queue()
         self.process = context.Process(target=_worker_main, daemon=True,
-                                       args=(self.jobs, self.results, self.control, str(path)))
+                                       args=(self.jobs, self.results, self.control, str(path), offset))
         self.process.start()
 
     def submit(self, frame_id, timestamp, front, side):

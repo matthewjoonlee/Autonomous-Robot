@@ -69,3 +69,18 @@ class FrameDistancesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ZoneOffsetTest(unittest.TestCase):
+    def test_front_reference_reaches_each_zone_earlier_by_offset(self):
+        center = ZoneTracker()
+        front = ZoneTracker(offset=5.0)
+        values = [36, 36] + [36 - 0.25 * i for i in range(220)]
+        seen_center, seen_front = {}, {}
+        for i, v in enumerate(values):
+            for tracker, seen in ((center, seen_center), (front, seen_front)):
+                change = tracker.update(v, 0.0)
+                if change:
+                    seen.setdefault(change, values[i])
+        # The front reaches the turn zone when the center is still ~5 in before it.
+        self.assertAlmostEqual(seen_front["turn"] - seen_center["turn"], 5.0, delta=0.6)
