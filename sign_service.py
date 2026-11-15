@@ -31,6 +31,12 @@ SPOKEN = {"LEFT": "Left", "RIGHT": "Right", "STRAIGHT": "Straight", "PAUSE": "Pa
 MIN_SYMBOL_AREA = 120   # pixels in the 640x360 front frame (a sign ~1.5 m away)
 MIN_ARROW_AREA = 350    # arrows: larger, so chair wheels on bright carpet (~160 px) are not arrows
 HEAD_RATIO = 1.35       # arrowhead height / shaft height needed to call a direction
+# The sign's white panel can look tinted: in the Nov 15 lab, with the white balance
+# locked at startup, it was light blue (saturation ~82), and the old limit of 80
+# rejected nearly every real arrow. Brightness relative to the symbol does the work.
+WHITE_MAX_SAT = 140
+WHITE_SPREAD = 25       # max brightness spread (10th-90th percentile) of a panel's white
+WHITE_SPREAD_PAUSE = 45
 
 
 def _shape(contour):
@@ -92,14 +98,24 @@ def _surrounded_by_white(hsv, box, symbol_value):
     region = hsv[y0:y1, x0:x1]
     ring = np.ones(region.shape[:2], bool)
     ring[max(0, y - y0 - 2):y - y0 + h + 2, max(0, x - x0 - 2):x - x0 + w + 2] = False
-    if ring.sum() < 20 or x <= 1 or y <= 1 or x + w >= width - 1 or y + h >= height - 1:
+    edge = 4   # px: a symbol this close to the frame edge is cut off, not a whole sign
+    if ring.sum() < 20 or x <= edge or y <= edge or x + w >= width - edge or y + h >= height - edge:
         return 0.0, None   # symbol cut off by the frame edge: not the whole sign
     sat, val = region[..., 1][ring], region[..., 2][ring]
     level = float(np.percentile(val, 70))
     # A dark arrow must be well below the panel's white; a red hexagon is already
     # bright (~165 vs white ~200), so for red symbols only low saturation counts.
     floor = 0.75 * level if symbol_value is None else max(0.75 * level, symbol_value + 60)
-    white = (sat < 80) & (val > max(90.0, floor))
+    white = (sat < WHITE_MAX_SAT) & (val > max(90.0, floor))
+    if white.sum() > 10:
+        # A sign panel is an EVEN white; bright room background around people and
+        # chairs is not. Nov 15 lab: real sign 9-13 levels (10th-90th percentile),
+        # false hits 34-92.
+        low, high = np.percentile(val[white], [10, 90])
+        # The red hexagon with its dark outline is distinctive on its own; the dim
+        # Nov 12 room's real Pause sign had noisier white, so it gets more room.
+        if high - low > (WHITE_SPREAD_PAUSE if symbol_value is None else WHITE_SPREAD):
+            return 0.0, level
     return float(white.mean()), level
 
 
@@ -111,7 +127,7 @@ def _panel_box(hsv, box, level):
     gx, gy = int(1.0 * w) + 4, int(1.0 * h) + 4
     x0, y0, x1, y1 = max(0, x - gx), max(0, y - gy), min(width, x + w + gx), min(height, y + h + gy)
     region = hsv[y0:y1, x0:x1]
-    white = ((region[..., 1] < 80) & (region[..., 2] > 0.75 * level)).astype(np.uint8)
+    white = ((region[..., 1] < WHITE_MAX_SAT) & (region[..., 2] > 0.75 * level)).astype(np.uint8)
     white[y - y0:y - y0 + h, x - x0:x - x0 + w] = 1          # include the symbol itself
     count, labels, stats, _ = cv2.connectedComponentsWithStats(white, connectivity=4)
     symbol_label = labels[y - y0 + h // 2, x - x0 + w // 2]
@@ -149,7 +165,9 @@ def _symbols(frame, hsv):
         area, box, solidity, corners = _shape(contour)
         aspect = box[2] / box[3]
         # Blur and sunlight soften the real hexagon (solidity 0.84, rim 0.22 seen).
-        if (area >= MIN_SYMBOL_AREA and solidity > 0.80 and 0.8 <= aspect <= 1.7 and 5 <= corners <= 10
+        # The course hexagon is wider than tall (~1.1-1.4); a tall reddish cabinet at
+        # the frame edge passed with aspect 0.8 (Nov 15 lab).
+        if (area >= MIN_SYMBOL_AREA and solidity > 0.80 and 0.95 <= aspect <= 1.7 and 5 <= corners <= 10
                 and _dark_rim(hsv, contour, box) >= 0.15):   # course hexagon has a dark outline
             found.append(("PAUSE", box, solidity, f"hexagon solidity {solidity:.2f}, {corners} corners",
                           None))
