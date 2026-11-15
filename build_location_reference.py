@@ -25,17 +25,22 @@ import numpy as np
 from location_service import BOUNDARIES, REFERENCE, features, zone_index
 
 ROOT = Path(__file__).resolve().parent
-# Nov 12 four-way runs whose marks were checked against labeled still photos.
+# Nov 15 lab passes, marked with the robot's FRONT edge on measured zone lines
+# (+7.1 in to the center). Lab-only: the Nov 12 runs (other room, center eyeballed)
+# disagree with the lab marks by ~3 in at the first mark (the cross road sits at
+# row 0.86 there vs below the frame in the lab), and mixing them put the early
+# zones off. Lab-only held-out: median error 0.4-0.6 in, zone exact 93-99%.
+# (four_way_stops_20261115_164039 is a false start: marks seconds apart.)
 DEFAULT_RUNS = [
-    "quiz3_recordings/four_way_20261112_165907",
-    "quiz3_recordings/four_way_20261112_170234",
-    "quiz3_recordings/four_way_stops_20261112_170622",
-    # Nov 15, the brighter lab (front-edge marks + 7.1 in). The old runs predicted it
-    # poorly (median error 2.2 in, 90% 11 in), so the lab needs its own run.
-    # (four_way_stops_20261115_164039 is a false start: marks seconds apart.)
     "quiz3_recordings/four_way_stops_20261115_164159",
     "quiz3_recordings/four_way_stops_20261115_164702",
     "quiz3_recordings/four_way_stops_20261115_164828",
+]
+# Original-room runs, for reference or another room: build with --add <run>.
+NOV12_RUNS = [
+    "quiz3_recordings/four_way_20261112_165907",
+    "quiz3_recordings/four_way_20261112_170234",
+    "quiz3_recordings/four_way_stops_20261112_170622",
 ]
 
 
