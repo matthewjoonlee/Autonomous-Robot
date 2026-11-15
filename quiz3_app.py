@@ -15,7 +15,13 @@ Sign Reading: the robot stays still. Every sign the sign service (separate proce
 sign_service.py) reports steadily gets a box and label on the display and is
 announced once; showing a sign again after taking it away announces it again.
 
-Intersection run: the robot creeps forward holding its IMU heading. Every time the
+Intersection run: before the pause zone the robot centers itself on the lane with
+the lane-centering controller from quiz3_autonomous.py (it may be placed off-center
+or angled). The lane detector and its calibration (lane_center.json) were made on
+the old cropped camera view, which is exactly the middle of the full view
+(LEGACY_CROP), so it reads that region enlarged - no recalibration. Where the lane
+is not visible (cross road filling the view) and from the pause zone on, it holds
+the track direction with the IMU. Every time the
 location service (separate process, location_service.py) reports a new phase, the
 robot stops, announces the phase, shows it on the display, and waits --pause-s for
 the judges, then continues. After "Continue travel" it drives --finish-s more and
@@ -43,6 +49,16 @@ from record_quiz3 import CIRCLE, CROSS, SQUARE, TRIANGLE, Pad, drive_command, ho
 from sign_service import SPOKEN as SIGN_WORDS, SignWorker
 
 OPTIONS = 9
+# The old 640x480 front view used sensor area (1152, 432, 2304, 1728) of 4608x2592
+# (fov_check report). In the full 640x360 frame that is x 160-480, y 60-300.
+LEGACY_CROP = (160, 60, 320, 240)
+
+
+def legacy_view(front):
+    """Middle of the full view, enlarged to the old 640x480 lane-centering view."""
+    import cv2
+    x, y, w, h = LEGACY_CROP
+    return cv2.resize(front[y:y + h, x:x + w], (640, 480), interpolation=cv2.INTER_LINEAR)
 MODE_TEXT = {"idle": "Choose a mode: Square = Intersection, Triangle = Sign Reading",
              "intersection": "INTERSECTION DETECTION", "sign": "SIGN READING"}
 SPOKEN_MODE = {"intersection": "Intersection detection mode", "sign": "Sign reading mode"}
@@ -63,6 +79,16 @@ class App:
         self.signs = signs
         self.sign_result = None
         self.sign_announced = None
+        # lane centering
+        self.lane = None             # quiz3_autonomous.Controller during a run
+        self.lane_calibration = None
+        if not args.no_lane:
+            from lane_center import load
+            self.lane_calibration = load()
+        self.track_zero = None       # app heading that points along the track
+        self.lane_command = None
+        self.lane_status = ""
+        self.recent = []             # last few (front frame, heading) for the start measurement
         self.mode, self.state = "idle", "idle"
         self.quit = False
         self.frame_id = 0
@@ -123,9 +149,57 @@ class App:
         self.run_frame0 = self.frame_id + 1
         self.announced, self.pending, self.phase = -1, [], None
         self.held_heading = self.heading
+        self.start_lane(now)
         self.run_start = self.result_time = now
         self.state = "driving"
         self.message = "Driving"
+
+    def start_lane(self, now):
+        """Find the robot's angle to the lane from the last frames; set up the controller."""
+        self.lane, self.lane_command = None, None
+        if self.lane_calibration is None or self.heading is None:
+            return
+        import statistics
+        from dataclasses import replace
+        from lane_center import image_yaw, reference
+        from quiz3_autonomous import Controller, Settings
+        from track_vision import detect_lane
+        settings = replace(Settings(), speed=self.args.speed, lost_limit=1e9)
+        yaws = []
+        for frame, heading in self.recent:
+            detection = detect_lane(legacy_view(frame))
+            if detection["status"] == "tracked" and detection["confidence"] >= settings.min_confidence:
+                yaws.append(image_yaw(detection["fit"], self.lane_calibration, settings.rotation_error_per_deg)
+                            - (heading - self.heading))
+        yaw = statistics.median(yaws) if len(yaws) >= 2 else 0.0
+        # Relative heading 0 = along the track; the robot starts at `yaw` to it.
+        self.track_zero = self.heading - yaw
+        self.held_heading = self.track_zero
+        self.lane = Controller(reference(self.lane_calibration), now, settings, self.lane_calibration)
+        self.lane_status = (f"start angle {yaw:+.1f} deg from lane" if yaws
+                            else "lane not visible at start: holding heading")
+        print("Lane:", self.lane_status)
+
+    def lane_step(self, now):
+        """One lane-centering decision on the newest front frame (driving states only)."""
+        if self.lane is None or self.heading is None:
+            self.lane_command = None
+            return
+        heading = (self.heading - self.track_zero + 180) % 360 - 180
+        detection, summary = self.lane.observe(legacy_view(self.frames["front"]), heading, now)
+        if self.announced >= PHASES.index("pause"):
+            # Cross road from here on: lane fits are unreliable; hold the track direction.
+            detection = dict(detection, status="line_lost", confidence=0.0)
+        row = {}
+        try:
+            command = self.lane.decide(detection, summary, heading, now, row)
+        except RuntimeError as exc:   # e.g. turned past the safety limit
+            print("Lane controller stop:", exc)
+            self.stop_run("Stopped")
+            return
+        self.lane_command = (command["speed"], command["raw_turn"])
+        self.lane_status = (f"lane {row.get('state')}  offset {row.get('lateral_error', 0):+.3f}  "
+                            f"target {row.get('target_heading_deg') or 0:+.0f} deg")
 
     def stop_run(self, reason):
         if self.state in ("driving", "judging", "finishing"):
@@ -215,9 +289,12 @@ class App:
             return
         self.last_motor = now
         if self.state in ("driving", "finishing"):
-            error = self.heading_error()
-            turn = hold_turn(error, self.args.max_turn) if error is not None else 0
-            command = (self.args.speed, turn)
+            if self.lane_command is not None:
+                command = self.lane_command
+            else:
+                error = self.heading_error()
+                turn = hold_turn(error, self.args.max_turn) if error is not None else 0
+                command = (self.args.speed, turn)
         elif self.state in ("judging",):
             command = (0, 0)
         else:  # between runs: left stick repositions (R1 creeps)
@@ -259,6 +336,10 @@ class App:
                 HUNG.append(self.imu)
                 self.imu = None
         self.frame_id += 1
+        if self.heading is not None:
+            self.recent = (self.recent + [(self.frames["front"], self.heading)])[-6:]
+        if self.state in ("driving", "finishing"):
+            self.lane_step(now)
         if self.mode == "intersection" and self.frames["side"] is not None:
             self.worker.submit(self.frame_id, now, self.frames["front"], self.frames["side"])
         if self.mode == "sign":
@@ -289,6 +370,8 @@ class App:
         if self.mode == "intersection":
             phase = LABELS[self.phase] if self.phase else "-"
             label(canvas, f"PHASE: {phase}", (10, 330), (0, 255, 0), 1.1)
+            if self.lane_status and self.lane is not None:
+                label(canvas, self.lane_status, (508, 330), (200, 200, 255), 0.4)
             loc = self.result
             if loc and loc.get("distance_in") is not None:
                 label(canvas, f"location {loc['label']}  {loc['distance_in']:+.0f} in", (508, 285),
@@ -356,6 +439,7 @@ def main(argv=None):
     parser.add_argument("--execute", action="store_true", help="enable motors")
     parser.add_argument("--speed", type=int, default=22, help="forward speed during the run")
     parser.add_argument("--max-turn", type=int, default=15)
+    parser.add_argument("--no-lane", action="store_true", help="heading hold only, no lane centering")
     parser.add_argument("--pause-s", type=float, default=1.5, help="judging pause at each phase")
     parser.add_argument("--finish-s", type=float, default=1.5, help="drive after Continue travel")
     parser.add_argument("--lost-s", type=float, default=2.0, help="stop if no location for this long")
