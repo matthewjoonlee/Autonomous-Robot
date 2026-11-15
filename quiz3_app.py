@@ -15,6 +15,14 @@ Sign Reading: the robot stays still. Every sign the sign service (separate proce
 sign_service.py) reports steadily gets a box and label on the display and is
 announced once; showing a sign again after taking it away announces it again.
 
+Zones: the cameras locate the robot up to "Read the sign" (the approach view is
+distinctive and was located within ~1 in). From there the robot's front position is
+carried forward by DRIVING time x speed (stops do not count); the speed is measured
+from the camera estimates during the approach (default 4.0 in/s, Nov 15 lab). Near
+the intersection the camera estimates were unreliable on the lab track (misreads,
+values stuck at calibration stops), while driving distance matched the cameras to
+the inch on the approach. --camera-zones uses the cameras for every zone instead.
+
 Intersection run: before the pause zone the robot centers itself on the lane with
 the lane-centering controller from quiz3_autonomous.py (it may be placed off-center
 or angled). The lane detector and its calibration (lane_center.json) were made on
@@ -44,7 +52,7 @@ import time
 import numpy as np
 
 from capture_quiz3 import HUNG, grab, open_side, read_heading, with_timeout
-from location_service import LABELS, PHASES, LocationWorker
+from location_service import LABELS, PHASES, LocationWorker, zone_index
 from record_quiz3 import CIRCLE, CROSS, SQUARE, TRIANGLE, Pad, drive_command, hold_turn, open_writer
 from sign_service import SPOKEN as SIGN_WORDS, SignWorker
 
@@ -89,6 +97,14 @@ class App:
         self.lane_command = None
         self.lane_status = ""
         self.recent = []             # last few (front frame, heading) for the start measurement
+        # odometry from the Read-the-sign anchor
+        self.offset = getattr(args, "zone_offset", 0.0)
+        self.drive_time = 0.0        # seconds the motors drove forward during this run
+        self.last_loop = None
+        self.anchor = None           # (front distance, drive_time) when Read the sign was located
+        self.speed_points = []       # (drive_time, camera front estimate) during the approach
+        self.speed = args.drive_speed
+        self.odo_front = None
         self.mode, self.state = "idle", "idle"
         self.quit = False
         self.frame_id = 0
@@ -152,6 +168,8 @@ class App:
         self.held_heading = self.heading
         self.start_lane(now)
         self.run_start = self.result_time = self.familiar_time = now
+        self.drive_time, self.anchor, self.speed_points = 0.0, None, []
+        self.speed, self.odo_front = self.args.drive_speed, None
         self.state = "driving"
         self.message = "Driving"
 
@@ -235,7 +253,10 @@ class App:
                 self.result, self.result_time = result, now
                 if result.get("familiar", True):
                     self.familiar_time = now
-                if self.state in ("driving", "judging") and result["zone"] is not None:
+                if (self.anchor is None and self.state == "driving" and result.get("familiar", True)
+                        and result.get("raw_distance_in") is not None):
+                    self.speed_points.append((self.drive_time, result["raw_distance_in"] - self.offset))
+                if self.state in ("driving", "judging") and result["zone"] is not None and self.anchor is None:
                     index = PHASES.index(result["zone"])
                     if self.announced < 0:
                         # Start: announce only the zone the robot is in, not the ones before it.
@@ -244,11 +265,26 @@ class App:
                     while self.announced < index:
                         self.announced += 1
                         self.pending.append(self.announced)
+                    if index >= PHASES.index("read_sign") and not self.args.camera_zones:
+                        self.set_anchor(result)
             elif self.state not in ("driving", "judging", "finishing"):
                 self.result = result  # show live location while idle too
+        if self.anchor is not None and self.state in ("driving", "judging", "finishing"):
+            front, start = self.anchor
+            self.odo_front = front - self.speed * (self.drive_time - start)
+            # Announce on the line: `zone_lead` covers the time to speak and stop.
+            target = zone_index(self.odo_front - self.args.zone_lead)
+            while self.announced < target:
+                self.announced += 1
+                self.pending.append(self.announced)
         if self.state == "driving":
             if self.pending:
                 self.begin_phase(self.pending.pop(0), now)
+            elif self.anchor is not None:
+                if now - self.run_start > self.args.max_run_s:
+                    self.stop_run("Stopped")
+                elif self.heading_error() is not None and abs(self.heading_error()) > self.args.max_heading:
+                    self.stop_run("Stopped")
             elif now - self.result_time > self.args.lost_s:
                 self.stop_run("Location lost. Stopping.")
             elif now - self.familiar_time > self.args.unfamiliar_s:
@@ -274,6 +310,22 @@ class App:
             self.motors_stop()
             self.say("Run complete")
             self.message = "Run complete - Cross to run again"
+
+    def set_anchor(self, result):
+        """Camera located Read the sign: carry the front position forward by driving time."""
+        import numpy as np
+        front = (result["distance_in"] if result.get("distance_in") is not None
+                 else result["raw_distance_in"]) - self.offset
+        self.anchor = (front, self.drive_time)
+        points = [(t, d) for t, d in self.speed_points if t > self.drive_time - 4.0]
+        speed, how = self.args.drive_speed, "default"
+        if len(points) >= 8 and np.ptp([t for t, _ in points]) >= 1.0:
+            slope = -np.polyfit([t for t, _ in points], [d for _, d in points], 1)[0]
+            if 2.5 <= slope <= 6.0:
+                speed, how = float(slope), "measured"
+        self.speed = speed
+        print(f"Anchor: front {front:+.1f} in at Read the sign; speed {speed:.2f} in/s ({how}, "
+              f"{len(points)} points)")
 
     def begin_phase(self, index, now):
         self.phase = PHASES[index]
@@ -386,6 +438,9 @@ class App:
             phase = ("Approaching" if self.phase == "approach"
                      else LABELS[self.phase] if self.phase else "-")
             label(canvas, f"PHASE: {phase}", (10, 330), (0, 255, 0), 1.1)
+            if self.odo_front is not None:
+                label(canvas, f"front {self.odo_front:+.1f} in (driving distance, {self.speed:.1f} in/s)",
+                      (508, 345), (180, 255, 180), 0.4)
             if self.lane_status and self.lane is not None:
                 label(canvas, self.lane_status, (508, 330), (200, 200, 255), 0.4)
             loc = self.result
@@ -407,6 +462,10 @@ class App:
         next_frame = time.monotonic()
         while not self.quit:
             now = time.monotonic()
+            if (self.last_loop is not None and self.state in ("driving", "finishing")
+                    and self.command[0] > 0):
+                self.drive_time += now - self.last_loop
+            self.last_loop = now
             self.handle_inputs(now)
             self.update_signs()
             self.update_run(now)
@@ -432,7 +491,8 @@ class Recorder:
         self.file = (self.folder / "frames.csv").open("x", newline="")
         self.log = csv.writer(self.file)
         self.log.writerow(["frame", "time", "mode", "state", "phase", "location_zone",
-                           "distance_in", "heading_rel_deg", "speed", "turn"])
+                           "distance_in", "heading_rel_deg", "speed", "turn", "odo_front_in",
+                           "drive_time_s", "raw_distance_in"])
         self.start = time.monotonic()
 
     def write(self, app, now):
@@ -441,7 +501,9 @@ class Recorder:
         self.side.write(side if side is not None else self.blank)
         loc = app.result or {}
         self.log.writerow([app.frame_id, f"{now - self.start:.3f}", app.mode, app.state, app.phase,
-                           loc.get("zone"), loc.get("distance_in"), app.heading, *app.command])
+                           loc.get("zone"), loc.get("distance_in"), app.heading, *app.command,
+                           None if app.odo_front is None else round(app.odo_front, 2),
+                           round(app.drive_time, 3), loc.get("raw_distance_in")])
 
     def close(self):
         self.front.release()
@@ -456,6 +518,12 @@ def main(argv=None):
     parser.add_argument("--speed", type=int, default=22, help="forward speed during the run")
     parser.add_argument("--max-turn", type=int, default=15)
     parser.add_argument("--no-lane", action="store_true", help="heading hold only, no lane centering")
+    parser.add_argument("--camera-zones", action="store_true",
+                        help="use camera estimates for every zone (no driving-distance after Read the sign)")
+    parser.add_argument("--drive-speed", type=float, default=4.0,
+                        help="in/s if it cannot be measured on the approach (Nov 15 lab: 4.0)")
+    parser.add_argument("--zone-lead", type=float, default=0.3,
+                        help="announce this many inches before each line (speaking/stopping delay)")
     parser.add_argument("--zone-ref", choices=("center", "front"), default="front",
                         help="which point of the robot the zones are judged by (default front)")
     # Body 36 cm (wheels stick out 2 cm more at the back; the front is what matters).
@@ -512,6 +580,7 @@ def main(argv=None):
         print(f"Zones judged at the robot's {args.zone_ref}"
               + (f" ({offset:.1f} in ahead of center)" if offset else ""))
         worker = LocationWorker(offset=offset)  # start early: loading overlaps setup
+        args.zone_offset = offset
         signs = SignWorker()
         display = RobotDisplay(fullscreen=not args.windowed, fps=30, size=(800, 480), bg_color=(0, 0, 0))
         display.set_status("Starting...", position="top", bg_color=(0, 0, 0), text_color=(255, 255, 255))
