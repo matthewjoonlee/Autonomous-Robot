@@ -35,6 +35,9 @@ DEFAULT_RUNS = [
     "quiz3_recordings/four_way_stops_20261115_164159",
     "quiz3_recordings/four_way_stops_20261115_164702",
     "quiz3_recordings/four_way_stops_20261115_164828",
+    # Nov 16, the sunny lobby (exam venue), front-edge tape marks. (lobby_stops_20261116_152119
+    # is left out: the side camera recorded black frames.)
+    "quiz3_recordings/lobby_stops_20261116_152506",
 ]
 # Original-room runs, for reference or another room: build with --add <run>.
 NOV12_RUNS = [
