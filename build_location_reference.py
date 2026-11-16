@@ -62,6 +62,14 @@ def frame_distances(folder):
     for row in rows:
         driving.append(driving[-1] + (float(row.get("speed") or 0) > 0))
     distances = [None] * len(rows)
+    if driving[-1] == 0:
+        # Pushed by hand (no motor commands logged): place frames between marks by
+        # frame count instead, and nothing outside the marks. Push steadily and mark
+        # every few inches.
+        for (f0, d0), (f1, d1) in zip(marks, marks[1:]):
+            for i in range(f0, min(f1, len(rows) - 1) + 1):
+                distances[i] = d0 + (d1 - d0) * (i - f0) / max(1, f1 - f0)
+        return distances
     for (f0, d0), (f1, d1) in zip(marks, marks[1:]):
         span = driving[f1] - driving[f0]
         for i in range(f0, min(f1, len(rows) - 1) + 1):

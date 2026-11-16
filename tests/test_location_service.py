@@ -142,3 +142,14 @@ class PositionFuserTest(unittest.TestCase):
         for _ in range(5):
             fuser.observe(10.0, 3.5)                 # still only close after 3 s of driving
         self.assertIsNotNone(fuser.position(3.5))
+
+
+class HandPushedTest(FrameDistancesTest):
+    def test_hand_pushed_pass_interpolates_by_frames(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            self.write(folder, [0] * 11, [(0, 30), (10, 20)])   # no motor commands at all
+            d = frame_distances(folder)
+            self.assertAlmostEqual(d[5], 25.0)
+            self.assertEqual(d[0], 30)
+            self.assertEqual(d[10], 20)
