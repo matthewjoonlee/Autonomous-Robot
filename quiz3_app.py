@@ -54,7 +54,7 @@ import time
 import numpy as np
 
 from capture_quiz3 import HUNG, grab, open_side, read_heading, with_timeout
-from location_service import LABELS, PHASES, LocationWorker, PositionFuser, zone_index
+from location_service import BOUNDARIES, LABELS, PHASES, LocationWorker, PositionFuser, zone_index
 from record_quiz3 import CIRCLE, CROSS, SQUARE, TRIANGLE, Pad, drive_command, hold_turn, open_writer
 from sign_service import SPOKEN as SIGN_WORDS, SignWorker
 
@@ -62,6 +62,21 @@ OPTIONS = 9
 # The old 640x480 front view used sensor area (1152, 432, 2304, 1728) of 4608x2592
 # (fov_check report). In the full 640x360 frame that is x 160-480, y 60-300.
 LEGACY_CROP = (160, 60, 320, 240)
+CROSS_ROAD_HALF_WIDTH_IN = 32 / 2.54 / 2   # cross road is 32 cm wide: far edge 6.3 in past center
+
+
+def zone_boundaries(args):
+    """Zone lines for the robot's FRONT edge (inches, + before the cross-road center line).
+
+    Read the sign, Pause, Entering and Turn: BOUNDARIES (Week 10 diagram on the mat).
+    Nov 16, from the instructor: Exiting is when the front is about to leave the
+    intersection, i.e. `exit_before_in` before the cross road's far edge (6.3 in past
+    the center line). Continue travel follows `continue_after_in` later (the old
+    -6.1 line would have come less than an inch after Exiting).
+    """
+    exiting = -CROSS_ROAD_HALF_WIDTH_IN + args.exit_before_in
+    continuing = exiting - args.continue_after_in
+    return tuple(BOUNDARIES[:4]) + (exiting, continuing)
 LANE_PER_INCH = 0.032   # near-row lane x per inch of sideways offset (estimate)
 
 
@@ -118,6 +133,7 @@ class App:
         self.drive_time = 0.0        # seconds the motors drove forward during this run
         self.last_loop = None
         self.fuser = None            # PositionFuser during a run (None with --camera-zones)
+        self.boundaries = zone_boundaries(args)
         self.speed = args.drive_speed
         self.odo_front = None
         self.mode, self.state = "idle", "idle"
@@ -306,7 +322,7 @@ class App:
             self.odo_front = self.fuser.position(self.drive_time)
             if self.odo_front is not None:
                 # Announce on the line: `zone_lead` covers the time to speak and stop.
-                target = zone_index(self.odo_front - self.args.zone_lead)
+                target = zone_index(self.odo_front - self.args.zone_lead, self.boundaries)
                 if self.announced < 0:
                     self.announced = max(0, target) - 1 if target > 0 else 0
                 while self.announced < target:
@@ -563,6 +579,11 @@ def main(argv=None):
                              "4.0; raised after zones came later and later on Nov 15 test runs)")
     parser.add_argument("--measure-speed", action="store_true",
                         help="re-measure the speed from camera readings on the approach")
+    parser.add_argument("--exit-before-in", type=float, default=1.0,
+                        help="Exiting is announced when the robot's front is this far before the cross "
+                             "road's far edge (about to leave the intersection)")
+    parser.add_argument("--continue-after-in", type=float, default=3.0,
+                        help="Continue travel this many inches of driving after Exiting")
     parser.add_argument("--zone-lead", type=float, default=0.8,
                         help="announce this many inches before each line (speaking/stopping delay)")
     parser.add_argument("--zone-ref", choices=("center", "front"), default="front",
@@ -667,6 +688,9 @@ def main(argv=None):
         display.set_status(MODE_TEXT["idle"], position="top", bg_color=(0, 0, 0), text_color=(255, 255, 255))
         announcer.say("Ready")
         print("Ready." + ("" if saber else " Motors are OFF (add --execute)."))
+        lines = zone_boundaries(args)
+        print("Zone lines (robot front, in): " + ", ".join(
+            f"{LABELS[p]} {b:+.1f}" for p, b in zip(PHASES[1:], lines)))
         App(args, display, pad, front, side, imu, saber, announcer, worker, recorder, signs).run()
     except KeyboardInterrupt:
         print("\nStopping.")

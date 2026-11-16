@@ -50,9 +50,9 @@ FAMILIAR_FACTOR = 2.0   # views up to this x the typical cross-run match cost ar
 SIDE_STRIPS = 8
 
 
-def zone_index(distance):
-    """Index into PHASES for a robot-center distance in inches."""
-    return sum(distance < boundary for boundary in BOUNDARIES)
+def zone_index(distance, boundaries=BOUNDARIES):
+    """Index into PHASES for a distance in inches (+ before the cross-road center line)."""
+    return sum(distance < boundary for boundary in boundaries)
 
 
 # ---------------------------------------------------------------- features
