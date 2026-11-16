@@ -440,6 +440,16 @@ class PositionFuser:
         self.outliers = []
         self.accepted = []     # (drive time, reading) used to measure speed
 
+    @property
+    def started(self):
+        return self.x is not None
+
+    def start_at(self, front, drive_time):
+        """Start from a position measured some other way (e.g. the sign's size)."""
+        self.x, self.t = float(front), drive_time
+        self.pending, self.pending_close, self.outliers = [], [], []
+        self.accepted = [(drive_time, self.x)]
+
     def position(self, drive_time):
         """Front position now (advances by speed x driving time since the last update)."""
         if self.x is None:

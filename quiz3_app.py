@@ -16,6 +16,12 @@ Sign Reading: the robot stays still. Every sign the sign service (separate proce
 sign_service.py) reports steadily gets a box and label on the display and is
 announced once; showing a sign again after taking it away announces it again.
 
+Intersection run start: the robot drives along the lane ("Searching", no phases) until
+it sees the intersection - five agreeing camera readings of 20 in or more - or a sign
+close enough that its size gives the distance (--sign-trigger-in); then the zones
+begin. Close camera readings never start it (far starts misread as ~4-11 in).
+--start-front-in skips the search; --search-s stops it if nothing is seen.
+
 Zones come from one running front position (PositionFuser): it advances by driving
 time x speed (stops do not count), and while the front is more than 20 in out each
 camera reading nudges it; misreads are ignored, and a run of agreeing readings
@@ -78,6 +84,19 @@ def zone_boundaries(args):
     exiting = -CROSS_ROAD_HALF_WIDTH_IN + args.exit_before_in
     continuing = exiting - args.continue_after_in
     return tuple(BOUNDARIES[:4]) + (exiting, continuing)
+# Sign seen on the approach -> robot FRONT distance from the cross-road center line:
+# front = SIGN_K / box height (px, 640x360 frame) - SIGN_C. Fit Nov 16 lobby (sign on
+# the near corner of the intersection, two runs, 9-32 in): within ~2 in.
+SIGN_K, SIGN_C = 2333.0, 10.8
+
+
+def sign_front_in(box):
+    """Front distance (in) implied by a sign's box (x, y, w, h), or None."""
+    if not box or box[3] <= 0:
+        return None
+    return SIGN_K / box[3] - SIGN_C
+
+
 LANE_PER_INCH = 0.032   # near-row lane x per inch of sideways offset (estimate)
 
 
@@ -107,6 +126,7 @@ class App:
         self.sign_result = None
         self.sign_announced = None
         self.sign_last, self.sign_seen = None, 0.0
+        self.sign_heights, self.sign_heights_frame = [], None   # recent sign box heights (search)
         # lane centering
         self.lane = None             # quiz3_autonomous.Controller during a run
         self.lane_calibration = None
@@ -210,8 +230,13 @@ class App:
             speed=self.args.drive_speed, measure_speed=self.args.measure_speed,
             start=self.args.start_front_in)
         self.speed = self.args.drive_speed
+        # Until the intersection (steady far camera readings) or the sign is seen, the
+        # robot just drives along the lane: no phases, no "unfamiliar view" stop.
+        self.signs.reset()
+        self.sign_result = None
+        self.sign_heights, self.sign_heights_frame = [], None
         self.state = "driving"
-        self.message = "Driving"
+        self.message = "Driving" if not self.searching() else "Searching for the intersection"
 
     def start_lane(self, now):
         """Find the robot's angle to the lane from the last frames; set up the controller."""
@@ -272,6 +297,34 @@ class App:
         self.lane_status = (f"lane {row.get('state')}  offset {row.get('lateral_error', 0):+.3f}  "
                             f"target {row.get('target_heading_deg') or 0:+.0f} deg")
 
+    def searching(self):
+        """True while driving toward an intersection not yet seen (position unknown)."""
+        return (self.fuser is not None and not self.fuser.started
+                and self.state in ("driving", "judging", "finishing"))
+
+    def sign_trigger(self):
+        """Start the position from the sign's size once it is close enough to trust."""
+        result = self.sign_result
+        if (self.args.no_sign_trigger or not self.searching() or not result
+                or result.get("frame_id", -1) < self.run_frame0 or not result.get("label")):
+            return
+        box = result.get("box")
+        if not box or result["frame_id"] == self.sign_heights_frame:
+            return
+        # Median of the last 3 box heights: the odd box grabs extra panel above the sign
+        # (Nov 16 lobby: 101-113 px among ~60 px), which alone would read ~12 in.
+        self.sign_heights_frame = result["frame_id"]
+        self.sign_heights = (self.sign_heights + [box[3]])[-3:]
+        if len(self.sign_heights) < 3:
+            return
+        height = sorted(self.sign_heights)[1]
+        front = sign_front_in((0, 0, 0, height))
+        if front is not None and front <= self.args.sign_trigger_in:
+            self.fuser.start_at(front, self.drive_time)
+            print(f"Triggered by the {result['label']} sign: front {front:+.1f} in "
+                  f"(box height {height} px)")
+            self.message = f"Sign seen: front {front:.0f} in"
+
     def stop_run(self, reason):
         if self.state in ("driving", "judging", "finishing"):
             self.say(reason)
@@ -328,8 +381,18 @@ class App:
                         self.pending.append(self.announced)
             elif self.state not in ("driving", "judging", "finishing"):
                 self.result = result  # show live location while idle too
+        if self.searching():
+            self.sign_trigger()
+            if (self.searching() and self.state == "driving" and self.args.search_s
+                    and now - self.run_start > self.args.search_s):
+                print(f"No intersection or sign seen in {self.args.search_s:.0f} s.")
+                self.stop_run("Stopped")
         if self.fuser is not None and self.state in ("driving", "judging", "finishing"):
+            started = self.fuser.started
             self.odo_front = self.fuser.position(self.drive_time)
+            if started and self.message == "Searching for the intersection":
+                print(f"Triggered by the intersection (camera): front {self.odo_front:+.1f} in")
+                self.message = "Intersection seen"
             if self.odo_front is not None:
                 # Announce on the line: `zone_lead` covers the time to speak and stop.
                 target = zone_index(self.odo_front - self.args.zone_lead, self.boundaries)
@@ -349,7 +412,7 @@ class App:
                     self.stop_run("Stopped")
             elif now - self.result_time > self.args.lost_s:
                 self.stop_run("Location lost. Stopping.")
-            elif now - self.familiar_time > self.args.unfamiliar_s:
+            elif now - self.familiar_time > self.args.unfamiliar_s and not self.searching():
                 # Views unlike the reference for this long: the room needs calibrating.
                 print("Stopping: camera views do not match the location reference "
                       "(new room? record a calibration run).")
@@ -465,7 +528,7 @@ class App:
             self.lane_step(now)
         if self.mode == "intersection" and self.frames["side"] is not None:
             self.worker.submit(self.frame_id, now, self.frames["front"], self.frames["side"])
-        if self.mode == "sign":
+        if self.mode == "sign" or (self.searching() and not self.args.no_sign_trigger):
             self.signs.submit(self.frame_id, now, self.frames["front"])
         if self.recorder:
             self.recorder.write(self, now)
@@ -476,7 +539,9 @@ class App:
         front, side = self.frames["front"], self.frames["side"]
         canvas = np.zeros((400, 800, 3), dtype=np.uint8)
         if self.mode == "intersection":
-            annotations = (self.result or {}).get("annotations", [])
+            annotations = list((self.result or {}).get("annotations", []))
+            if self.searching():
+                annotations += (self.sign_result or {}).get("annotations", [])
         elif self.mode == "sign":
             annotations = (self.sign_result or {}).get("annotations", [])
         else:
@@ -491,7 +556,8 @@ class App:
         if self.mode != "sign":  # Sign Reading has its own large label below
             label(canvas, mode, (508, 255), (0, 255, 255), 0.6)
         if self.mode == "intersection":
-            phase = ("Approaching" if self.phase == "approach"
+            phase = ("Searching" if self.searching()
+                     else "Approaching" if self.phase == "approach"
                      else LABELS[self.phase] if self.phase else "-")
             label(canvas, f"PHASE: {phase}", (10, 330), (0, 255, 0), 1.1)
             if self.odo_front is not None:
@@ -612,6 +678,13 @@ def main(argv=None):
     parser.add_argument("--start-front-in", type=float, default=None,
                         help="robot FRONT edge's distance (in) from the cross-road center line "
                              "at the start, if you place it on a marked spot (default: camera)")
+    parser.add_argument("--search-s", type=float, default=60.0,
+                        help="stop if neither the intersection nor a sign is seen for this long (0 = never)")
+    parser.add_argument("--sign-trigger-in", type=float, default=45.0,
+                        help="a sign seen at a front distance (from its size) of this or less "
+                             "starts the zones")
+    parser.add_argument("--no-sign-trigger", action="store_true",
+                        help="only the camera's intersection readings start the zones")
     parser.add_argument("--unfamiliar-s", type=float, default=10.0,
                         help="stop if the views match no reference frame for this long (~40 in)")
     parser.add_argument("--max-run-s", type=float, default=120.0, help="safety stop")
