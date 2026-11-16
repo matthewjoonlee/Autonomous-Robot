@@ -270,7 +270,10 @@ class SignTracker:
     """
     window: int = 5
     agree: int = 3
-    hold: int = 5     # frames (~0.5 s) before a vanished sign's label clears
+    # Frames (~1.2 s) before a vanished sign's label clears: a still sign is missed in
+    # the odd frame (lobby, Nov 16), and clearing after 0.5 s made the box flicker and
+    # the sign be announced again.
+    hold: int = 10
     recent: deque = field(default_factory=lambda: deque(maxlen=5))
     label: str = None
     box: tuple = None
@@ -315,7 +318,7 @@ class SignService:
             x, y, w, h = detection["box"]
             annotations.append({"kind": "rect", "camera": "front", "xy": (x, y), "xy2": (x + w, y + h),
                                 "color": (0, 200, 255), "thickness": 1})
-        if label and box and self.tracker.missing <= 2:  # steady result, bold; gone within ~0.2 s
+        if label and box and self.tracker.missing <= 4:  # steady result, bold; gone within ~0.5 s
             x, y, w, h = box
             annotations.append({"kind": "rect", "camera": "front", "xy": (x - 2, y - 2),
                                 "xy2": (x + w + 2, y + h + 2), "color": (0, 255, 0), "thickness": 3})

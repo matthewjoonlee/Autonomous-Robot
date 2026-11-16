@@ -62,6 +62,7 @@ OPTIONS = 9
 # The old 640x480 front view used sensor area (1152, 432, 2304, 1728) of 4608x2592
 # (fov_check report). In the full 640x360 frame that is x 160-480, y 60-300.
 LEGACY_CROP = (160, 60, 320, 240)
+REANNOUNCE_GAP_S = 2.0  # same sign is announced again only after this long unseen
 CROSS_ROAD_HALF_WIDTH_IN = 32 / 2.54 / 2   # cross road is 32 cm wide: far edge 6.3 in past center
 
 
@@ -105,6 +106,7 @@ class App:
         self.signs = signs
         self.sign_result = None
         self.sign_announced = None
+        self.sign_last, self.sign_seen = None, 0.0
         # lane centering
         self.lane = None             # quiz3_autonomous.Controller during a run
         self.lane_calibration = None
@@ -185,6 +187,7 @@ class App:
         if mode == "sign":
             self.signs.reset()
             self.sign_result, self.sign_announced = None, None
+            self.sign_last, self.sign_seen = None, 0.0
         self.phase = None
         self.message = ("Press Cross to start" if mode == "intersection"
                         else "Show a sign to the front camera")
@@ -285,12 +288,18 @@ class App:
             return
         self.sign_result = result
         label = result["label"]
-        if label != self.sign_announced:
-            self.sign_announced = label
-            if label is not None and self.mode == "sign":
+        now = time.monotonic()
+        if label is not None:
+            # A NEW sign is announced at once; the SAME sign again only after it was
+            # gone for over 2 s (a short miss is not a new presentation).
+            repeat = label == self.sign_last and now - self.sign_seen < REANNOUNCE_GAP_S
+            if label != self.sign_announced and not repeat and self.mode == "sign":
                 self.say(SIGN_WORDS[label])
                 self.message = f"Sign: {SIGN_WORDS[label]}"
                 print(f"sign: {label}  box {result['box']}")
+            self.sign_announced, self.sign_last, self.sign_seen = label, label, now
+        else:
+            self.sign_announced = None
 
     def update_run(self, now):
         result = self.worker.latest()

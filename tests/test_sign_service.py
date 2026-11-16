@@ -78,9 +78,17 @@ class SignTrackerTest(unittest.TestCase):
     def test_same_sign_again_after_removal_is_announced_again(self):
         tracker = SignTracker()
         left = {"label": "LEFT", "box": (1, 2, 3, 4)}
-        changes = [tracker.update(d) for d in [left] * 4 + [None] * 8 + [left] * 4]
+        changes = [tracker.update(d) for d in [left] * 4 + [None] * 12 + [left] * 4]
         self.assertEqual([c for c in changes if c], ["LEFT", "LEFT"])
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SignHoldTest(unittest.TestCase):
+    def test_short_miss_keeps_the_label(self):
+        tracker = SignTracker()
+        left = {"label": "LEFT", "box": (1, 2, 3, 4)}
+        changes = [tracker.update(d) for d in [left] * 4 + [None] * 4 + [left] * 4]
+        self.assertEqual([c for c in changes if c], ["LEFT"])
