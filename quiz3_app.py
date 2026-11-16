@@ -62,6 +62,7 @@ OPTIONS = 9
 # The old 640x480 front view used sensor area (1152, 432, 2304, 1728) of 4608x2592
 # (fov_check report). In the full 640x360 frame that is x 160-480, y 60-300.
 LEGACY_CROP = (160, 60, 320, 240)
+LANE_PER_INCH = 0.032   # near-row lane x per inch of sideways offset (estimate)
 
 
 def legacy_view(front):
@@ -99,6 +100,16 @@ class App:
             # the Oct lane_center.json held the robot ~50-60 px right of the line.
             full = Path(__file__).resolve().parent / "lane_center_full.json"
             self.lane_calibration = load(full) if full.exists() else load()
+            if args.lane_offset_in:
+                # Positive = drive further RIGHT. Lane x is normalized image width;
+                # the dashes move ~0.032 per inch on the near row (Nov 16 estimate from
+                # the far-row road width) and 0.6 x that on the far row.
+                shift = LANE_PER_INCH * args.lane_offset_in
+                self.lane_calibration = dict(self.lane_calibration)
+                self.lane_calibration["near_x"] -= shift
+                self.lane_calibration["far_x"] -= shift * self.lane_calibration["offset_far_ratio"]
+                print(f"Lane center shifted {args.lane_offset_in:+.1f} in: near_x "
+                      f"{self.lane_calibration['near_x']:.3f}, far_x {self.lane_calibration['far_x']:.3f}")
         self.track_zero = None       # app heading that points along the track
         self.lane_command = None
         self.lane_status = ""
@@ -537,6 +548,8 @@ def main(argv=None):
     parser.add_argument("--speed", type=int, default=22, help="forward speed during the run")
     parser.add_argument("--max-turn", type=int, default=15)
     parser.add_argument("--no-lane", action="store_true", help="heading hold only, no lane centering")
+    parser.add_argument("--lane-offset-in", type=float, default=0.0,
+                        help="shift where lane centering holds the robot, inches (+ = further right)")
     parser.add_argument("--lane-detector", choices=("dashes", "road"), default="dashes",
                         help="lane centering follows the yellow dashes (default) or the dark road surface")
     parser.add_argument("--lane-max-angle", type=float, default=6.0,
