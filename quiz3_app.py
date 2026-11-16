@@ -88,6 +88,7 @@ def zone_boundaries(args):
 # front = SIGN_K / box height (px, 640x360 frame) - SIGN_C. Fit Nov 16 lobby (sign on
 # the near corner of the intersection, two runs, 9-32 in): within ~2 in.
 SIGN_K, SIGN_C = 2333.0, 10.8
+SIGN_MIN_FRONT_IN = 6.0   # closer, the sign is leaving the view (box clipped)
 
 
 def sign_front_in(box):
@@ -302,28 +303,41 @@ class App:
         return (self.fuser is not None and not self.fuser.started
                 and self.state in ("driving", "judging", "finishing"))
 
-    def sign_trigger(self):
-        """Start the position from the sign's size once it is close enough to trust."""
+    def sign_active(self):
+        """Feed the sign worker: from the run start until the sign leaves the view."""
+        return (not self.args.no_sign_trigger and self.fuser is not None
+                and self.state in ("driving", "judging", "finishing")
+                and (self.odo_front is None or self.odo_front > SIGN_MIN_FRONT_IN - 2))
+
+    def sign_position(self):
+        """Distance from the sign's size: starts the position (within --sign-trigger-in)
+        and then steers it while the sign stays in view."""
         result = self.sign_result
-        if (self.args.no_sign_trigger or not self.searching() or not result
-                or result.get("frame_id", -1) < self.run_frame0 or not result.get("label")):
+        if (not self.sign_active() or not result or result.get("frame_id", -1) < self.run_frame0
+                or result["frame_id"] == self.sign_heights_frame):
             return
-        box = result.get("box")
-        if not box or result["frame_id"] == self.sign_heights_frame:
+        self.sign_heights_frame = result["frame_id"]
+        raw = result.get("raw")
+        # Only this frame's own detection: the steady label keeps its last box for ~1 s
+        # after the sign leaves the view, which would freeze the position.
+        if not raw or raw.get("label") != result.get("label") or not raw.get("box"):
             return
         # Median of the last 3 box heights: the odd box grabs extra panel above the sign
         # (Nov 16 lobby: 101-113 px among ~60 px), which alone would read ~12 in.
-        self.sign_heights_frame = result["frame_id"]
-        self.sign_heights = (self.sign_heights + [box[3]])[-3:]
+        self.sign_heights = (self.sign_heights + [raw["box"][3]])[-3:]
         if len(self.sign_heights) < 3:
             return
         height = sorted(self.sign_heights)[1]
         front = sign_front_in((0, 0, 0, height))
-        if front is not None and front <= self.args.sign_trigger_in:
-            self.fuser.start_at(front, self.drive_time)
+        if front is None or front < SIGN_MIN_FRONT_IN:
+            return
+        if not self.fuser.started:
+            if front > self.args.sign_trigger_in:
+                return
             print(f"Triggered by the {result['label']} sign: front {front:+.1f} in "
                   f"(box height {height} px)")
             self.message = f"Sign seen: front {front:.0f} in"
+        self.fuser.observe_sign(front, self.drive_time)
 
     def stop_run(self, reason):
         if self.state in ("driving", "judging", "finishing"):
@@ -381,12 +395,11 @@ class App:
                         self.pending.append(self.announced)
             elif self.state not in ("driving", "judging", "finishing"):
                 self.result = result  # show live location while idle too
-        if self.searching():
-            self.sign_trigger()
-            if (self.searching() and self.state == "driving" and self.args.search_s
-                    and now - self.run_start > self.args.search_s):
-                print(f"No intersection or sign seen in {self.args.search_s:.0f} s.")
-                self.stop_run("Stopped")
+        self.sign_position()
+        if (self.searching() and self.state == "driving" and self.args.search_s
+                and now - self.run_start > self.args.search_s):
+            print(f"No intersection or sign seen in {self.args.search_s:.0f} s.")
+            self.stop_run("Stopped")
         if self.fuser is not None and self.state in ("driving", "judging", "finishing"):
             started = self.fuser.started
             self.odo_front = self.fuser.position(self.drive_time)
@@ -528,7 +541,7 @@ class App:
             self.lane_step(now)
         if self.mode == "intersection" and self.frames["side"] is not None:
             self.worker.submit(self.frame_id, now, self.frames["front"], self.frames["side"])
-        if self.mode == "sign" or (self.searching() and not self.args.no_sign_trigger):
+        if self.mode == "sign" or self.sign_active():
             self.signs.submit(self.frame_id, now, self.frames["front"])
         if self.recorder:
             self.recorder.write(self, now)
@@ -540,7 +553,7 @@ class App:
         canvas = np.zeros((400, 800, 3), dtype=np.uint8)
         if self.mode == "intersection":
             annotations = list((self.result or {}).get("annotations", []))
-            if self.searching():
+            if self.sign_active():
                 annotations += (self.sign_result or {}).get("annotations", [])
         elif self.mode == "sign":
             annotations = (self.sign_result or {}).get("annotations", [])
@@ -684,7 +697,7 @@ def main(argv=None):
                         help="a sign seen at a front distance (from its size) of this or less "
                              "starts the zones")
     parser.add_argument("--no-sign-trigger", action="store_true",
-                        help="only the camera's intersection readings start the zones")
+                        help="do not use the sign: only the camera's readings place the robot")
     parser.add_argument("--unfamiliar-s", type=float, default=10.0,
                         help="stop if the views match no reference frame for this long (~40 in)")
     parser.add_argument("--max-run-s", type=float, default=120.0, help="safety stop")

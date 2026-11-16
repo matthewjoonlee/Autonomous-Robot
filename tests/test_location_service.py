@@ -146,6 +146,20 @@ class PositionFuserTest(unittest.TestCase):
             fuser.observe(40.0, 4.0)                 # far readings start it
         self.assertAlmostEqual(fuser.position(4.0), 40.0, delta=0.01)
 
+    def test_sign_blocks_camera_readings(self):
+        fuser = PositionFuser(speed=4.0, start=30.0)
+        fuser.observe_sign(30.0, 0.0)
+        for k in range(10):   # false far readings while the sign is in view
+            fuser.observe(45.0, 0.1 * k)
+        self.assertAlmostEqual(fuser.position(0.9), 30.0 - 3.6, delta=0.1)
+
+    def test_sign_starts_and_steers(self):
+        fuser = PositionFuser(speed=4.0)
+        fuser.observe_sign(36.0, 1.0)
+        self.assertAlmostEqual(fuser.position(1.0), 36.0)
+        fuser.observe_sign(30.0, 1.0)
+        self.assertAlmostEqual(fuser.position(1.0), 33.0)
+
     def test_known_start(self):
         fuser = PositionFuser(speed=4.0, start=38.0)
         self.assertAlmostEqual(fuser.position(1.0), 34.0)

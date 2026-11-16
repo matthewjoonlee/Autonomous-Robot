@@ -421,7 +421,12 @@ class PositionFuser:
       start a mat farther back than the calibration (~50 in) read a steady false
       ~11 in (lab frames), and starting from it announced Entering a mat early.
       Quiz starts are on the approach, so it waits for far readings instead;
-    - `start` (front inches) starts it at a known, hand-placed position at once.
+    - `start` (front inches) starts it at a known, hand-placed position at once;
+    - `observe_sign` feeds a distance from the sign's size (quiz3_app). While the sign
+      is in view it steers the position and camera readings are ignored: Nov 16
+      lobby, the camera readings stuck at ~35 in and a run of false far readings
+      near the intersection reset the position 17 in back (Pause came inside the
+      intersection), while the sign's size tracked the robot to ~2 in.
     """
 
     def __init__(self, speed=4.0, gain=0.25, gate=5.0, reinit_n=6, camera_until=20.0,
@@ -439,6 +444,8 @@ class PositionFuser:
         self.init_timeout = init_timeout
         self.outliers = []
         self.accepted = []     # (drive time, reading) used to measure speed
+        self.sign_time = None  # drive time of the last sign reading
+        self.sign_hold = 1.0
 
     @property
     def started(self):
@@ -449,6 +456,18 @@ class PositionFuser:
         self.x, self.t = float(front), drive_time
         self.pending, self.pending_close, self.outliers = [], [], []
         self.accepted = [(drive_time, self.x)]
+
+    def observe_sign(self, front, drive_time, gain=0.5):
+        """Feed a front distance measured from the sign's size; camera readings are
+        ignored for `sign_hold` seconds of driving after each one."""
+        x = self.position(drive_time)
+        if x is None:
+            self.start_at(front, drive_time)
+        else:
+            self.x += gain * (front - x)
+            self.outliers = []
+        self.sign_time = drive_time
+        return self.x
 
     def position(self, drive_time):
         """Front position now (advances by speed x driving time since the last update)."""
@@ -463,6 +482,8 @@ class PositionFuser:
         x = self.position(drive_time)
         if reading is None:
             return x
+        if self.sign_time is not None and drive_time - self.sign_time <= self.sign_hold:
+            return x            # the sign is in view: it is the better measurement
         if x is None:
             if reading >= self.camera_until:
                 self.pending.append((drive_time, reading))

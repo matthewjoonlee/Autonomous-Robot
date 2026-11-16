@@ -39,6 +39,11 @@ def make_app(**overrides):
     return app
 
 
+def sign(frame_id, label, height):
+    box = (0, 0, height, height)
+    return {"frame_id": frame_id, "label": label, "box": box, "raw": {"label": label, "box": box}}
+
+
 def location(frame_id, front, offset=7.09):
     return {"frame_id": frame_id, "familiar": True, "raw_distance_in": front + offset,
             "zone": None, "distance_in": front + offset, "annotations": []}
@@ -67,17 +72,17 @@ class SearchTest(unittest.TestCase):
         app = make_app()
         app.start_run(0.0)
         for k, height in enumerate((50, 110, 50)):   # one oversized box is outvoted
-            app.sign_result = {"frame_id": app.run_frame0 + k, "label": "STRAIGHT", "box": (0, 0, 50, height)}
+            app.sign_result = sign(app.run_frame0 + k, "STRAIGHT", height)
             app.update_run(0.1 * k)
             self.assertEqual(app.searching(), k < 2)
-        self.assertAlmostEqual(app.odo_front, sign_front_in((0, 0, 50, 50)), delta=0.1)
+        self.assertAlmostEqual(app.odo_front, sign_front_in((0, 0, 50, 50)), delta=0.5)
         self.assertEqual(app.said, [])        # 35.9 in: still on the approach
 
     def test_far_sign_is_ignored(self):
         app = make_app()
         app.start_run(0.0)
         for k in range(5):
-            app.sign_result = {"frame_id": app.run_frame0 + k, "label": "LEFT", "box": (0, 0, 30, 30)}
+            app.sign_result = sign(app.run_frame0 + k, "LEFT", 30)
             app.update_run(0.1 * k)
         self.assertTrue(app.searching())
 
@@ -89,6 +94,26 @@ class SearchTest(unittest.TestCase):
             app.update_run(0.1 * k)
         self.assertFalse(app.searching())
         self.assertAlmostEqual(app.odo_front, 30.0, delta=0.5)
+
+    def test_sign_in_view_overrides_false_far_readings(self):
+        app = make_app()
+        app.start_run(0.0)
+        for k in range(30):   # sign says the robot closes from ~36 to ~19 in; camera says 36
+            app.drive_time = 0.1 * k
+            height = int(50 + k)
+            app.sign_result = sign(app.run_frame0 + k, "STRAIGHT", height)
+            app.worker.out.append(location(app.run_frame0 + k, 36.0))
+            app.update_run(0.1 * k)
+        self.assertAlmostEqual(app.odo_front, sign_front_in((0, 0, 79, 79)), delta=2.0)
+
+    def test_stale_steady_box_is_not_used(self):
+        app = make_app(start_front_in=20.0)
+        app.start_run(0.0)
+        for k in range(5):    # sign gone from this frame (raw None), steady box still held
+            app.sign_result = {"frame_id": app.run_frame0 + k, "label": "LEFT",
+                               "box": (0, 0, 50, 50), "raw": None}
+            app.update_run(0.0)
+        self.assertAlmostEqual(app.odo_front, 20.0, delta=0.01)
 
     def test_search_gives_up(self):
         app = make_app(search_s=5.0)
