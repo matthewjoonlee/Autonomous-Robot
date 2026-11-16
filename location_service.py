@@ -475,7 +475,12 @@ class PositionFuser:
         else:
             self.outliers.append(reading)
             recent = self.outliers[-self.reinit_n:]
-            if len(recent) == self.reinit_n and max(recent) - min(recent) < self.gate:
+            # Reset only to a position FARTHER back (the robot moved less than its
+            # driving time says: blocked, slow, bad start). Runs of CLOSER readings are
+            # misreads: in the lobby, readings flipped between the true ~43 in and a
+            # false ~11 in, and resetting to them announced Entering at the start.
+            if (len(recent) == self.reinit_n and max(recent) - min(recent) < self.gate
+                    and float(np.median(recent)) > x):
                 self.x = float(np.median(recent))
                 self.outliers, self.accepted = [], [(drive_time, self.x)]
         return self.x
