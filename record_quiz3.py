@@ -43,6 +43,7 @@ from capture_quiz3 import HUNG, open_side, read_heading, slug, with_timeout
 # Button numbers as in ps5_controller.py (same for PS4 controllers on the Pi).
 CROSS, CIRCLE, TRIANGLE, SQUARE, R1, R2 = 0, 1, 2, 3, 5, 7
 DEFAULT_MARKS = "36,-12"
+FRONT_TO_CENTER_IN = 36 / 2.54 / 2   # front edge to body middle (36 cm body)
 MOTOR_INTERVAL = 0.04  # seconds between motor commands (auto-stop is 200 ms)
 # Smallest commands that actually move the robot on the mats: forward 25 moved it
 # ~11 cm/s (Oct 11 motor trials); 20 was never shown to move it. Turns below ~8
@@ -181,6 +182,9 @@ def main():
     parser.add_argument("--max-turn", type=int, default=15, help="steering while creeping")
     parser.add_argument("--no-hold", action="store_true", help="no IMU heading hold while creeping")
     parser.add_argument("--manual-max", type=int, default=45, help="left-stick drive limit")
+    parser.add_argument("--front-edge", action="store_true",
+                        help="marks are tape distances to the robot's FRONT edge (saved as the "
+                             "robot center, 7.1 in further back)")
     parser.add_argument("--marks", type=parse_marks, default=parse_marks(DEFAULT_MARKS),
                         help=f"distances for Cross presses, in order (default {DEFAULT_MARKS})")
     parser.add_argument("--fps", type=float, default=10.0)
@@ -335,6 +339,11 @@ def main():
 
             def add_mark(elapsed, distance, text):
                 nonlocal marks
+                if args.front_edge and distance != "":
+                    # Tape numbers are the FRONT edge's distance from the cross-road center
+                    # line; the location reference stores the robot center, 18 cm behind it.
+                    text = f"front {distance:g}"
+                    distance = round(distance + FRONT_TO_CENTER_IN, 2)
                 mark_csv.writerow([f"{elapsed:.3f}", frames, distance, text])
                 mark_log.flush()
                 marks += 1
