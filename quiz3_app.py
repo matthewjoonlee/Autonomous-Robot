@@ -207,7 +207,8 @@ class App:
         self.run_start = self.result_time = self.familiar_time = now
         self.drive_time, self.odo_front = 0.0, None
         self.fuser = None if self.args.camera_zones else PositionFuser(
-            speed=self.args.drive_speed, measure_speed=self.args.measure_speed)
+            speed=self.args.drive_speed, measure_speed=self.args.measure_speed,
+            start=self.args.start_front_in)
         self.speed = self.args.drive_speed
         self.state = "driving"
         self.message = "Driving"
@@ -608,6 +609,9 @@ def main(argv=None):
     parser.add_argument("--finish-s", type=float, default=0.0,
                         help="seconds to drive after Continue travel (0 = until Cross is pressed)")
     parser.add_argument("--lost-s", type=float, default=2.0, help="stop if no location for this long")
+    parser.add_argument("--start-front-in", type=float, default=None,
+                        help="robot FRONT edge's distance (in) from the cross-road center line "
+                             "at the start, if you place it on a marked spot (default: camera)")
     parser.add_argument("--unfamiliar-s", type=float, default=10.0,
                         help="stop if the views match no reference frame for this long (~40 in)")
     parser.add_argument("--max-run-s", type=float, default=120.0, help="safety stop")

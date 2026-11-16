@@ -140,8 +140,15 @@ class PositionFuserTest(unittest.TestCase):
             fuser.observe(10.0, 0.5)                 # stuck close value at the start
         self.assertIsNone(fuser.position(0.5))
         for _ in range(5):
-            fuser.observe(10.0, 3.5)                 # still only close after 3 s of driving
-        self.assertIsNotNone(fuser.position(3.5))
+            fuser.observe(10.0, 3.5)                 # still only close: keep waiting
+        self.assertIsNone(fuser.position(3.5))
+        for _ in range(5):
+            fuser.observe(40.0, 4.0)                 # far readings start it
+        self.assertAlmostEqual(fuser.position(4.0), 40.0, delta=0.01)
+
+    def test_known_start(self):
+        fuser = PositionFuser(speed=4.0, start=38.0)
+        self.assertAlmostEqual(fuser.position(1.0), 34.0)
 
 
 class HandPushedTest(FrameDistancesTest):

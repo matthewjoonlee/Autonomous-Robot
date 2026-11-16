@@ -417,19 +417,22 @@ class PositionFuser:
     - the first position is the median of the first `init_n` readings at or beyond
       `camera_until` (the robot starts on the approach; a first reading stuck at a
       close calibration-stop value would otherwise lock in, since close-in readings
-      are not used for corrections). Close readings start it only after
-      `init_timeout` seconds of driving without far ones (a genuinely close start).
+      are not used for corrections). Close readings never start it: Nov 16 lobby, a
+      start a mat farther back than the calibration (~50 in) read a steady false
+      ~11 in (lab frames), and starting from it announced Entering a mat early.
+      Quiz starts are on the approach, so it waits for far readings instead;
+    - `start` (front inches) starts it at a known, hand-placed position at once.
     """
 
     def __init__(self, speed=4.0, gain=0.25, gate=5.0, reinit_n=6, camera_until=20.0,
                  init_n=5, speed_window=4.0, speed_limits=(2.5, 6.0), measure_speed=False,
-                 init_timeout=3.0):
+                 init_timeout=None, start=None):
         self.speed, self.default_speed = speed, speed
         self.gain, self.gate, self.reinit_n = gain, gate, reinit_n
         self.camera_until, self.init_n = camera_until, init_n
         self.speed_window, self.speed_limits = speed_window, speed_limits
         self.measure_speed = measure_speed
-        self.x = None          # front position at drive time self.t
+        self.x = start         # front position at drive time self.t
         self.t = 0.0
         self.pending = []      # far readings before the first position
         self.pending_close = []
@@ -456,7 +459,8 @@ class PositionFuser:
                 source = self.pending
             else:
                 self.pending_close.append((drive_time, reading))
-                source = self.pending_close if drive_time >= self.init_timeout else []
+                source = (self.pending_close if self.init_timeout is not None
+                          and drive_time >= self.init_timeout else [])
             if len(source) >= self.init_n:
                 times, values = zip(*source[-self.init_n:])
                 self.x = float(np.median(values)) - self.speed * (drive_time - float(np.mean(times)))
