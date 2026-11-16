@@ -191,7 +191,8 @@ class App:
         from dataclasses import replace
         from lane_center import image_yaw, reference
         from quiz3_autonomous import Controller, Settings
-        from track_vision import detect_lane
+        from track_vision import detect_lane, detect_line
+        detect = detect_line if self.args.lane_detector == "dashes" else detect_lane
         # Gentler than quiz3_autonomous: the first lane reading far from the intersection
         # (cross road in view) swung the robot ~8 deg right at the start (Nov 15 lab).
         settings = replace(Settings(), speed=self.args.speed, lost_limit=1e9,
@@ -199,7 +200,7 @@ class App:
                            position_gain=self.args.lane_gain)
         yaws = []
         for frame, heading in self.recent:
-            detection = detect_lane(legacy_view(frame))
+            detection = detect(legacy_view(frame))
             if detection["status"] == "tracked" and detection["confidence"] >= settings.min_confidence:
                 yaws.append(image_yaw(detection["fit"], self.lane_calibration, settings.rotation_error_per_deg)
                             - (heading - self.heading))
@@ -218,7 +219,14 @@ class App:
             self.lane_command = None
             return
         heading = (self.heading - self.track_zero + 180) % 360 - 180
-        detection, summary = self.lane.observe(legacy_view(self.frames["front"]), heading, now)
+        if self.args.lane_detector == "dashes":
+            # Follow the yellow center dashes: in the sunny lobby the road-surface fit
+            # was misled by the shiny floor and the cross road (found 32/97 frames).
+            from track_vision import detect_line, summarize
+            detection = detect_line(legacy_view(self.frames["front"]))
+            summary = summarize(detection, self.lane.reference, heading)
+        else:
+            detection, summary = self.lane.observe(legacy_view(self.frames["front"]), heading, now)
         if self.announced >= PHASES.index("pause"):
             # Cross road from here on: lane fits are unreliable; hold the track direction.
             detection = dict(detection, status="line_lost", confidence=0.0)
@@ -529,6 +537,8 @@ def main(argv=None):
     parser.add_argument("--speed", type=int, default=22, help="forward speed during the run")
     parser.add_argument("--max-turn", type=int, default=15)
     parser.add_argument("--no-lane", action="store_true", help="heading hold only, no lane centering")
+    parser.add_argument("--lane-detector", choices=("dashes", "road"), default="dashes",
+                        help="lane centering follows the yellow dashes (default) or the dark road surface")
     parser.add_argument("--lane-max-angle", type=float, default=6.0,
                         help="largest heading lane centering may aim for, degrees (quiz3_autonomous: 12)")
     parser.add_argument("--lane-gain", type=float, default=60.0,

@@ -1,13 +1,11 @@
 {
   "offset_far_ratio": 0.6,
   "rotation_far_ratio": 0.91,
-  "notes": "Centered lane position for quiz3_app (full camera view, middle cut out as the old 640x480 lane view). Measured Nov 15 from the three lab calibration passes, driven centered on the yellow line; lane_center.json (Oct, old view) put the robot ~50-60 px right of the line. offset/rotation ratios copied from lane_center.json.",
+  "notes": "Centered lane position for quiz3_app's lane centering with the DASHES detector (track_vision.detect_line) on the middle of the full camera view. Measured Nov 16 in the sunny lobby (exam venue) from a calibration pass driven centered on the yellow line. The road-surface detector misread the line there (lane found in 32/97 frames, fits cutting across the lane) and the robot drove diagonally left. Lab values: lane_center_lab.json.",
   "width": 640,
-  "near_x": 0.7182,
-  "far_x": 0.6623,
+  "near_x": 0.782,
+  "far_x": 0.7078,
   "center_images": [
-    "quiz3_recordings/four_way_stops_20261115_164159 (frames +16..+34 in, lane tracked)",
-    "quiz3_recordings/four_way_stops_20261115_164702 (frames +16..+34 in, lane tracked)",
-    "quiz3_recordings/four_way_stops_20261115_164828 (frames +16..+34 in, lane tracked)"
+    "quiz3_recordings/lobby_stops_20261116_152506 (frames +20..+45 in, dashes tracked 97/97)"
   ]
 }

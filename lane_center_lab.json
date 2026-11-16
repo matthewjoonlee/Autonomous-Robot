@@ -1,0 +1,13 @@
+{
+  "offset_far_ratio": 0.6,
+  "rotation_far_ratio": 0.91,
+  "notes": "Lab (Nov 15) centered position for the ROAD-surface lane detector (detect_lane). Kept for reference; quiz3_app now uses lane_center_full.json (lobby, dashes detector).",
+  "width": 640,
+  "near_x": 0.7182,
+  "far_x": 0.6623,
+  "center_images": [
+    "quiz3_recordings/four_way_stops_20261115_164159 (frames +16..+34 in, lane tracked)",
+    "quiz3_recordings/four_way_stops_20261115_164702 (frames +16..+34 in, lane tracked)",
+    "quiz3_recordings/four_way_stops_20261115_164828 (frames +16..+34 in, lane tracked)"
+  ]
+}
